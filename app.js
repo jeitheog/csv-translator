@@ -29,6 +29,9 @@ const SHOPIFY_TRANSLATABLE_COLS = new Set([
   'Option1 Name',       // real export (names)
   'Option2 Name',
   'Option3 Name',
+  'Image Alt Text',     // image descriptions
+  'SEO Title',          // SEO title
+  'SEO Description',    // SEO description
   // Option Values are added dynamically — only for color options
 ]);
 
