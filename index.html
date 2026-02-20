@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CSV Traductor al Español</title>
+  <meta name="description"
+    content="Traduce archivos CSV al español de forma rápida y sencilla. Sube tu archivo, selecciona las columnas y descarga el resultado." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <!-- Cache-busting: always load the latest CSS -->
+  <script>
+    (function () {
+      var v = Date.now();
+      var l = document.createElement('link');
+      l.rel = 'stylesheet'; l.href = 'style.css?v=' + v;
+      document.head.appendChild(l);
+    })();
+  </script>
+</head>
+
+<body>
+  <div class="bg-orbs">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <header class="header">
+    <div class="logo">
+      <span class="logo-icon">🌐</span>
+      <span class="logo-text">CSV<span class="accent">Español</span></span>
+    </div>
+    <p class="tagline">Traduce tus archivos CSV al español en segundos</p>
+  </header>
+
+  <main class="main">
+
+    <!-- STEP 1: Upload -->
+    <section class="card" id="step-upload">
+      <div class="step-badge">1</div>
+      <h2>Sube tu archivo CSV</h2>
+      <div class="drop-zone" id="dropZone">
+        <div class="drop-icon">📂</div>
+        <p class="drop-title">Arrastra y suelta tu archivo aquí</p>
+        <p class="drop-sub">o haz clic para seleccionar</p>
+        <input type="file" id="fileInput" accept=".csv" hidden />
+        <button class="btn btn-outline" id="browseBtn">Seleccionar archivo</button>
+      </div>
+      <div class="file-info hidden" id="fileInfo">
+        <span class="file-icon">📄</span>
+        <span id="fileName"></span>
+        <span id="fileSize" class="muted"></span>
+        <button class="btn-icon" id="removeFile" title="Eliminar archivo">✕</button>
+      </div>
+    </section>
+
+    <!-- STEP 2: Configure -->
+    <section class="card hidden" id="step-configure">
+      <div class="step-badge">2</div>
+      <h2>Configura la traducción</h2>
+
+      <div class="config-row">
+        <label class="config-label">Idioma de origen</label>
+        <select id="sourceLang" class="select">
+          <option value="en">Inglés</option>
+          <option value="fr">Francés</option>
+          <option value="de">Alemán</option>
+          <option value="it">Italiano</option>
+          <option value="pt">Portugués</option>
+          <option value="nl">Neerlandés</option>
+          <option value="auto">Detectar automáticamente</option>
+        </select>
+      </div>
+
+      <div class="config-row">
+        <label class="config-label">🏷️ Nombre de tu marca (para títulos)</label>
+        <p class="config-hint">Se reemplazará la marca original y se mejorará el título con palabras atractivas</p>
+        <input type="text" id="brandName" class="select" placeholder="Ej: Rovelli Maison" value="Rovelli Maison"
+          style="width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);color:#fff;font-size:0.95rem;" />
+
+      </div>
+
+      <div class="config-row">
+        <label class="config-label">Columnas a traducir</label>
+        <p class="config-hint">Selecciona las columnas que contienen texto a traducir</p>
+        <div class="columns-grid" id="columnsGrid"></div>
+        <div class="columns-actions">
+          <button class="btn-text" id="selectAll">Seleccionar todas</button>
+          <button class="btn-text" id="deselectAll">Deseleccionar todas</button>
+        </div>
+      </div>
+
+
+
+      <button class="btn btn-primary" id="translateBtn">
+        <span class="btn-icon-left">✨</span> Traducir al Español
+      </button>
+    </section>
+
+    <!-- STEP 3: Progress -->
+    <section class="card hidden" id="step-progress">
+      <div class="step-badge">3</div>
+      <h2>Traduciendo...</h2>
+      <div class="progress-info">
+        <span id="progressText">Preparando traducción...</span>
+        <span id="progressPercent">0%</span>
+      </div>
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill" id="progressFill"></div>
+      </div>
+      <p class="muted center" id="progressDetail">Esto puede tardar unos minutos dependiendo del tamaño del archivo.</p>
+    </section>
+
+    <!-- STEP 4: Result -->
+    <section class="card hidden" id="step-result">
+      <div class="step-badge">4</div>
+      <h2>¡Traducción completada! 🎉</h2>
+      <div class="result-stats" id="resultStats"></div>
+
+      <div class="result-tabs">
+        <button class="tab active" data-tab="translated">Traducido</button>
+        <button class="tab" data-tab="comparison">Comparación</button>
+      </div>
+
+      <div class="tab-content" id="tab-translated">
+        <div class="table-wrapper">
+          <table class="preview-table" id="resultTable"></table>
+        </div>
+      </div>
+      <div class="tab-content hidden" id="tab-comparison">
+        <div class="table-wrapper">
+          <table class="preview-table" id="comparisonTable"></table>
+        </div>
+      </div>
+
+      <div class="result-actions">
+        <button class="btn btn-primary" id="downloadBtn">
+          ⬇️ Descargar CSV Traducido
+        </button>
+        <button class="btn btn-outline" id="startOverBtn">
+          🔄 Traducir otro archivo
+        </button>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <p>Powered by Google Translate · Traducción gratuita</p>
+  </footer>
+
+  <!-- Copy Modal -->
+  <div class="modal-overlay hidden" id="copyModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>📥 Tu CSV traducido</h3>
+        <button class="btn-icon" id="closeCopyModal">✕</button>
+      </div>
+      <p class="modal-hint">Si la descarga automática no funcionó, copia el contenido de abajo y pégalo en un archivo
+        <strong>.csv</strong> nuevo.
+      </p>
+      <textarea id="csvTextarea" class="csv-textarea" readonly spellcheck="false"></textarea>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="copyClipboardBtn">📋 Copiar al portapapeles</button>
+        <button class="btn btn-outline" id="closeCopyModal2"
+          onclick="document.getElementById('copyModal').classList.add('hidden')">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Cache-busting: always load the latest JS -->
+  <script>
+    (function () {
+      var s = document.createElement('script');
+      s.src = 'app.js?v=' + Date.now();
+      document.body.appendChild(s);
+    })();
+  </script>
+</body>
+
+</html>
