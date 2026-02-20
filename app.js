@@ -187,7 +187,6 @@ const pricingModal = $('pricingModal');
 const closePricingModal = $('closePricingModal');
 
 let currentAuthTab = 'login';
-const PRODUCT_LIMIT = 10;
 const downloadBtn = $('downloadBtn');
 const startOverBtn = $('startOverBtn');
 
@@ -479,7 +478,6 @@ deselectAllBtn.addEventListener('click', () => {
 // ── Title Paraphrasing Engine ──────────────────────────────
 const brandNameInput = document.getElementById('brandName');
 
-// Spanish synonym dictionary for common product/fashion words
 const SYNONYMS = {
   // Clothing types
   'polo': ['camiseta polo', 'polo deportivo', 'polo clásico', 'polo casual'],
@@ -526,37 +524,6 @@ const SYNONYMS = {
   // Prepositions & connectors
   'para': ['ideal para', 'diseñado para', 'pensado para', 'perfecto para'],
 };
-
-// Sentence pattern variations for restructuring
-const TITLE_PATTERNS = [
-  (brand, desc) => `${brand} - ${desc}`,
-  (brand, desc) => `${brand} | ${desc}`,
-  (brand, desc) => `${desc} - ${brand}`,
-  (brand, desc) => `${brand} - ${desc}`,
-];
-
-let patternIndex = 0;
-
-function paraphraseText(text) {
-  // Split into words, replace some with synonyms
-  let result = text;
-  const wordsToReplace = Object.keys(SYNONYMS).sort((a, b) => b.length - a.length);
-
-  // Replace 2-3 words per title to make it different but natural
-  let replacements = 0;
-  for (const word of wordsToReplace) {
-    if (replacements >= 3) break;
-    const regex = new RegExp(`\\b${word}\\b`, 'gi');
-    if (regex.test(result)) {
-      const options = SYNONYMS[word];
-      const replacement = options[Math.floor(Math.random() * options.length)];
-      result = result.replace(regex, replacement);
-      replacements++;
-    }
-  }
-
-  return result;
-}
 
 // ── AI-Style Brand Name Generator ──────────────────────────
 // Generates unique, premium-sounding brand names using syllable combinations
@@ -1122,16 +1089,6 @@ function generateTags(row, titleIdx, typeIdx, opt1NameIdx, opt2NameIdx) {
   return '';
 }
 
-// ── Auth Logic (Mock) ───────────────────────────────────────
-function initAuth() {
-  const savedUser = localStorage.getItem('csv_translator_user');
-  if (savedUser) {
-    state.user = JSON.parse(savedUser);
-    updateAuthUI();
-  }
-}
-
-
 function updateAuthUI() {
   if (state.user) {
     loginBtn.classList.add('hidden');
@@ -1206,10 +1163,7 @@ function saveUserState() {
   }
 }
 
-const ADMIN_CREDENTIALS = {
-  email: 'esbabyjei@gmail.com',
-  password: 'qZ2B8cn8'
-};
+// Las credenciales de admin se verifican en el servidor (/api/auth/login).
 
 
 
@@ -1357,12 +1311,34 @@ paymentForm.onsubmit = async (e) => {
   alert(`¡Pago exitoso! Bienvenido al Plan ${plan.toUpperCase()}`);
 };
 
-// ── Auth Logic (Mock) ───────────────────────────────────────
+// ── Auth Logic ─────────────────────────────────────────────
 function initAuth() {
   const savedUser = localStorage.getItem('csv_translator_user');
-  if (savedUser) {
-    state.user = JSON.parse(savedUser);
-    updateAuthUI();
+  if (!savedUser) return;
+
+  state.user = JSON.parse(savedUser);
+  updateAuthUI();
+
+  // Si es admin, verificar que la sesión del servidor sigue vigente
+  if (state.user?.role === 'admin') {
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
+      state.user = null;
+      localStorage.removeItem('csv_translator_user');
+      updateAuthUI();
+      return;
+    }
+    fetch('/api/auth/verify', { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(data => {
+        if (!data.success) {
+          state.user = null;
+          localStorage.removeItem('csv_translator_user');
+          localStorage.removeItem('auth_token');
+          updateAuthUI();
+        }
+      })
+      .catch(() => { /* servidor no disponible, mantener sesión local */ });
   }
 }
 
@@ -1372,10 +1348,12 @@ loginBtn.onclick = () => {
   authModal.classList.remove('hidden');
 };
 
-authWarningLink.onclick = (e) => {
-  e.preventDefault();
-  loginBtn.click();
-};
+if (authWarningLink) {
+  authWarningLink.onclick = (e) => {
+    e.preventDefault();
+    loginBtn.click();
+  };
+}
 
 closeAuthModal.onclick = () => authModal.classList.add('hidden');
 
@@ -1392,7 +1370,7 @@ function updateAuthModalUI() {
   authError.classList.add('hidden');
 }
 
-authForm.onsubmit = (e) => {
+authForm.onsubmit = async (e) => {
   e.preventDefault();
   const email = authEmail.value.trim();
   const password = authPassword.value;
@@ -1403,21 +1381,45 @@ authForm.onsubmit = (e) => {
     return;
   }
 
-  // Super-Admin check
-  if (email === ADMIN_CREDENTIALS.email && password === ADMIN_CREDENTIALS.password) {
-    state.user = {
-      email: email,
-      name: 'Super Admin',
-      plan: 'unlimited',
-      role: 'admin',
-      usage: 0,
-      filesProcessed: 0,
-      billingHistory: [],
-      regDate: new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }),
-      status: 'active'
-    };
-  } else {
-    // Normal user logic (Mock)
+  authSubmitBtn.disabled = true;
+  authError.classList.add('hidden');
+
+  try {
+    // Verificar credenciales contra el servidor (admin)
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      // Admin autenticado por el servidor
+      localStorage.setItem('auth_token', data.token);
+      state.user = {
+        ...data.user,
+        regDate: new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }),
+      };
+    } else if (res.status === 401) {
+      // No es admin — usuario normal (mock)
+      const existingUser = JSON.parse(localStorage.getItem('csv_translator_user'));
+      const plan = currentAuthTab === 'login' ? (existingUser?.plan || 'free') : 'free';
+      state.user = {
+        email,
+        plan,
+        role: 'user',
+        usage: existingUser?.usage || 0,
+        filesProcessed: existingUser?.filesProcessed || 0,
+        billingHistory: existingUser?.billingHistory || [],
+        regDate: existingUser?.regDate || new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }),
+      };
+    } else {
+      authError.textContent = data.error || 'Error del servidor';
+      authError.classList.remove('hidden');
+      return;
+    }
+  } catch {
+    // Servidor no disponible — solo permite usuarios normales (mock)
     const existingUser = JSON.parse(localStorage.getItem('csv_translator_user'));
     const plan = currentAuthTab === 'login' ? (existingUser?.plan || 'free') : 'free';
     state.user = {
@@ -1427,11 +1429,13 @@ authForm.onsubmit = (e) => {
       usage: existingUser?.usage || 0,
       filesProcessed: existingUser?.filesProcessed || 0,
       billingHistory: existingUser?.billingHistory || [],
-      regDate: existingUser?.regDate || new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })
+      regDate: existingUser?.regDate || new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }),
     };
+  } finally {
+    authSubmitBtn.disabled = false;
   }
 
-  // Add to allUsers for admin management view
+  // Añadir a allUsers para la vista del admin
   const allUsers = JSON.parse(localStorage.getItem('allUsers') || '[]');
   if (!allUsers.find(u => u.email === email)) {
     allUsers.push(state.user);
@@ -1444,7 +1448,17 @@ authForm.onsubmit = (e) => {
   authForm.reset();
 };
 
-logoutBtn.onclick = () => {
+logoutBtn.onclick = async () => {
+  const token = localStorage.getItem('auth_token');
+  if (token) {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+    } catch { /* ignorar si el servidor no está disponible */ }
+    localStorage.removeItem('auth_token');
+  }
   state.user = null;
   localStorage.removeItem('csv_translator_user');
   updateAuthUI();
@@ -1605,73 +1619,6 @@ startOverBtn.addEventListener('click', () => {
 
 // ── Helpers ────────────────────────────────────────────────
 // ── Admin Logic ───────────────────────────────────────────
-function updateAdminDash() {
-  const allUsers = JSON.parse(localStorage.getItem('allUsers') || '[]');
-
-  // Stats calculation
-  let mrr = 0;
-  let proCount = 0;
-  let bizCount = 0;
-  let freeCount = 0;
-
-  allUsers.forEach(u => {
-    if (u.plan === 'pro') { mrr += 29.99; proCount++; }
-    else if (u.plan === 'business') { mrr += 99.99; bizCount++; }
-    else { freeCount++; }
-  });
-
-  adminMRR.textContent = `$${mrr.toFixed(2)}`;
-  adminUserRatios.textContent = `${proCount} Pro / ${bizCount} Biz`;
-
-  // User Table
-  const userBody = adminUserTable.querySelector('tbody');
-  userBody.innerHTML = allUsers.map(u => `
-    <tr>
-      <td>
-        <div class="user-info">
-          <strong>${u.email}</strong>
-          <span class="xsmall muted">${u.name || 'Sin nombre'}</span>
-        </div>
-      </td>
-      <td><span class="badge-role ${u.role}">${u.role}</span></td>
-      <td>${u.regDate || 'N/A'}</td>
-      <td><span class="badge-status ${u.status === 'banned' ? 'banned' : 'active'}">${u.status === 'banned' ? 'Baneado' : 'Activo'}</span></td>
-      <td>
-        ${u.status === 'banned'
-      ? `<button class="btn-text" onclick="activateUser('${u.email}')">Reactivar</button>`
-      : `<button class="btn-text danger" onclick="banUser('${u.email}')">Banear</button>`}
-      </td>
-    </tr>
-  `).join('');
-
-  // Abuse Detection
-  const alerts = [];
-  allUsers.forEach(u => {
-    if (u.usage > 900) { // arbitrary >90% of a 1000 plan for demo
-      alerts.push({ type: 'Uso Crítico', user: u.email, detail: 'Consumo superior al 90% del límite mensual.' });
-    }
-    if (u.ips && u.ips.length > 3) {
-      alerts.push({ type: 'Multi-IP', user: u.email, detail: `Inicios de sesión desde ${u.ips.length} direcciones distintas.` });
-    }
-  });
-
-  abuseAlerts.innerHTML = alerts.map(a => `
-    <div class="abuse-card">
-      <div class="abuse-icon">⚠️</div>
-      <div class="abuse-content">
-        <h4>${a.type}: ${a.user}</h4>
-        <p>${a.detail}</p>
-      </div>
-    </div>
-  `).join('') || '<p class="muted center">No hay alertas activas</p>';
-
-  // Mock Failed Payments
-  const failedBody = adminFailedPayments.querySelector('tbody');
-  failedBody.innerHTML = `
-    <tr><td>20 Feb, 10:45</td><td>john@doe.com</td><td>Fondos insuficientes</td></tr>
-    <tr><td>19 Feb, 14:20</td><td>jane@test.nl</td><td>Tarjeta expirada</td></tr>
-  `;
-}
 
 window.banUser = (email) => {
   const allUsers = JSON.parse(localStorage.getItem('allUsers') || '[]');

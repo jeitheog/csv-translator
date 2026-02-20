@@ -3,4 +3,7 @@ node_modules/
 .DS_Store
 .vercel
 .env*.local
+.env
 deploy_clean/
+__pycache__/
+*.pyc
