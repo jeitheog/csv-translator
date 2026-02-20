@@ -11,6 +11,7 @@ const state = {
   translatedRows: [],
   fileName: '',
   isShopify: false,
+  user: null,      // { email, plan, usage, billingHistory: [], filesProcessed: 0 }
 };
 
 // ── Shopify Template Detection ─────────────────────────────
@@ -20,6 +21,8 @@ const SHOPIFY_TRANSLATABLE_COLS = new Set([
   'Title',
   'Description',        // generic template format
   'Body (HTML)',         // real export format
+  'Body HTML',           // variation
+  'Content',             // variation
   'Option1 name',       // generic template (names)
   'Option2 name',
   'Option3 name',
@@ -27,6 +30,15 @@ const SHOPIFY_TRANSLATABLE_COLS = new Set([
   'Option2 Name',
   'Option3 Name',
   // Option Values are added dynamically — only for color options
+]);
+
+const SHOPIFY_CLEARED_COLS = new Set([
+  'Type',
+  'Collections',        // generic template
+  'Tags',               // generic template
+  'Collection',         // variation
+  'Custom Product Type', // real export
+  'Standard Product Type' // real export
 ]);
 
 // Keywords that identify a color option (case-insensitive)
@@ -87,6 +99,7 @@ const sourceLang = $('sourceLang');
 const columnsGrid = $('columnsGrid');
 const selectAllBtn = $('selectAll');
 const deselectAllBtn = $('deselectAll');
+const selectedCount = $('selectedCount');
 const previewTable = $('previewTable');
 
 const translateBtn = $('translateBtn');
@@ -98,6 +111,83 @@ const progressDetail = $('progressDetail');
 const resultStats = $('resultStats');
 const resultTable = $('resultTable');
 const comparisonTable = $('comparisonTable');
+
+// ── Auth Refs ─────────────────────────────────────────────
+const loginBtn = $('loginBtn');
+const logoutBtn = $('logoutBtn');
+const userProfile = $('userProfile');
+const userEmailDisplay = $('userEmailDisplay');
+const authModal = $('authModal');
+const closeAuthModal = $('closeAuthModal');
+const authForm = $('authForm');
+const authEmail = $('authEmail');
+const authPassword = $('authPassword');
+const authSubmitBtn = $('authSubmitBtn');
+const authError = $('authError');
+const authTabs = document.querySelectorAll('.auth-tab');
+const authWarning = $('authWarning');
+const authWarningLink = $('authWarningLink');
+const authWarningTitle = $('authWarningTitle');
+const authWarningText = $('authWarningText');
+
+const userPlanBadge = $('userPlanBadge');
+const upgradeBtns = document.querySelectorAll('.upgrade-btn');
+
+// ── Dashboard & Payment Refs ────────────────────────────────
+const miCuentaBtn = $('miCuentaBtn');
+const dashboardModal = $('dashboardModal');
+const closeDashboardModal = $('closeDashboardModal');
+const dashEmail = $('dashEmail');
+const dashPlan = $('dashPlan');
+const dashNavItems = document.querySelectorAll('.nav-item');
+const dashViews = document.querySelectorAll('.dash-view');
+const usageCount = $('usageCount');
+const usageBarFill = $('usageBarFill');
+const dashFilesCount = $('dashFilesCount');
+
+const paymentModal = $('paymentModal');
+const closePaymentModal = $('closePaymentModal');
+const paymentForm = $('paymentForm');
+const cardNumber = $('cardNumber');
+const cardExpiry = $('cardExpiry');
+const cardCvc = $('cardCvc');
+const paymentError = $('paymentError');
+const paymentBtnText = $('paymentBtnText');
+const paymentSpinner = $('paymentSpinner');
+
+const cancelSubBtn = $('cancelSubBtn');
+const dashUpgradeBtn = $('dashUpgradeBtn');
+const dashUpgradeContainer = $('dashUpgradeContainer');
+const navAdmin = $('navAdmin');
+
+// Admin Refs
+const adminMRR = $('adminMRR');
+const adminUserRatios = $('adminUserRatios');
+const abuseAlerts = $('abuseAlerts');
+const adminUserTable = $('adminUserTable');
+const adminFailedPayments = $('adminFailedPayments');
+const adminLogsTable = $('adminLogsTable');
+const logFilter = $('logFilter');
+const addFaqBtn = $('addFaqBtn');
+const faqManagerList = $('faqManagerList');
+
+// FAQ Modal Refs
+const faqModal = $('faqModal');
+const closeFaqModal = $('closeFaqModal');
+const faqModalTitle = $('faqModalTitle');
+const faqQuestionInput = $('faqQuestionInput');
+const faqAnswerInput = $('faqAnswerInput');
+const saveFaqBtn = $('saveFaqBtn');
+
+let pendingPlanUpgrade = null;
+let currentDashView = 'stats';
+
+// ── Subscription Refs ──────────────────────────────────────
+const pricingModal = $('pricingModal');
+const closePricingModal = $('closePricingModal');
+
+let currentAuthTab = 'login';
+const PRODUCT_LIMIT = 10;
 const downloadBtn = $('downloadBtn');
 const startOverBtn = $('startOverBtn');
 
@@ -247,6 +337,32 @@ function parseCSV(text) {
 function showConfigStep() {
   state.isShopify = isShopifyTemplate(state.headers);
 
+  // Calculate statistics
+  const totalVariants = state.rows.length;
+  let uniqueProducts = 0;
+
+  const handleIdx = state.headers.indexOf('Handle');
+  const titleIdx = state.headers.indexOf('Title');
+
+  if (handleIdx >= 0) {
+    const handles = new Set(state.rows.map(r => r[handleIdx]).filter(h => h && h.trim()));
+    uniqueProducts = handles.size;
+  } else if (titleIdx >= 0) {
+    const titles = new Set(state.rows.map(r => r[titleIdx]).filter(t => t && t.trim()));
+    uniqueProducts = titles.size;
+  } else {
+    uniqueProducts = totalVariants; // Fallback
+  }
+
+  // Update Stats UI
+  const productEl = document.getElementById('countProducts');
+  const variantEl = document.getElementById('countVariants');
+  if (productEl) productEl.textContent = uniqueProducts;
+  if (variantEl) variantEl.textContent = totalVariants;
+
+  // Check limits
+  checkUsageLimits(uniqueProducts);
+
   // Show or hide the Shopify info banner
   let banner = $('shopifyBanner');
   if (state.isShopify) {
@@ -269,7 +385,6 @@ function showConfigStep() {
 
   stepConfigure.classList.remove('hidden');
   buildColumnsGrid();
-  buildPreviewTable();
 }
 
 function buildColumnsGrid() {
@@ -285,23 +400,43 @@ function buildColumnsGrid() {
       ? allTranslatable.has(header)              // Shopify: text + color fields
       : true;                                    // Generic: all columns by default
 
+    const shouldClearByDefault = state.isShopify && SHOPIFY_CLEARED_COLS.has(header);
+
     const chip = document.createElement('label');
-    chip.className = 'col-chip' + (shouldTranslate ? ' selected' : '');
+    chip.className = 'col-chip';
+    if (shouldTranslate && !shouldClearByDefault) chip.classList.add('selected');
     chip.dataset.idx = idx;
 
-    // In Shopify mode, lock non-translatable columns visually
-    const locked = state.isShopify && !allTranslatable.has(header);
+    // In Shopify mode, lock non-translatable columns visually (unless they are cleared columns)
+    const locked = state.isShopify && !allTranslatable.has(header) && !shouldClearByDefault;
     if (locked) chip.classList.add('locked');
 
-    chip.innerHTML = `<input type="checkbox" ${shouldTranslate ? 'checked' : ''} /><span class="check">${shouldTranslate ? '✓' : ''}</span> ${escapeHtml(header)}`;
+    let recommendTag = '';
+    if (shouldTranslate && !shouldClearByDefault) {
+      recommendTag = ' <small style="color:var(--accent);opacity:0.8;font-weight:600;">(recomendada)</small>';
+    } else if (shouldClearByDefault) {
+      recommendTag = ' <small style="color:#ef4444;opacity:0.9;font-weight:600;">(borrado recomendado)</small>';
+    }
+
+    const isChecked = shouldTranslate && !shouldClearByDefault;
+    chip.innerHTML = `<input type="checkbox" ${isChecked ? 'checked' : ''} /><span class="check">${isChecked ? '✓' : ''}</span> ${escapeHtml(header)}${recommendTag}`;
 
     if (!locked) {
       chip.addEventListener('click', () => toggleCol(chip, idx));
     }
 
     columnsGrid.appendChild(chip);
-    if (shouldTranslate) state.selectedCols.add(idx);
+    if (isChecked) state.selectedCols.add(idx);
   });
+
+  updateSelectionCounter();
+}
+
+function updateSelectionCounter() {
+  if (selectedCount) {
+    const count = state.selectedCols.size;
+    selectedCount.textContent = `${count} ${count === 1 ? 'seleccionada' : 'seleccionadas'}`;
+  }
 }
 
 function toggleCol(chip, idx) {
@@ -309,49 +444,37 @@ function toggleCol(chip, idx) {
     state.selectedCols.delete(idx);
     chip.classList.remove('selected');
     chip.querySelector('.check').textContent = '';
+    chip.querySelector('input').checked = false;
   } else {
     state.selectedCols.add(idx);
     chip.classList.add('selected');
     chip.querySelector('.check').textContent = '✓';
+    chip.querySelector('input').checked = true;
   }
+  updateSelectionCounter();
 }
 
 selectAllBtn.addEventListener('click', () => {
-  document.querySelectorAll('.col-chip').forEach((chip, idx) => {
+  document.querySelectorAll('.col-chip').forEach((chip) => {
+    const idx = parseInt(chip.dataset.idx);
     state.selectedCols.add(idx);
     chip.classList.add('selected');
     chip.querySelector('.check').textContent = '✓';
+    chip.querySelector('input').checked = true;
   });
+  updateSelectionCounter();
 });
 
 deselectAllBtn.addEventListener('click', () => {
   document.querySelectorAll('.col-chip').forEach(chip => {
     chip.classList.remove('selected');
     chip.querySelector('.check').textContent = '';
+    chip.querySelector('input').checked = false;
   });
   state.selectedCols.clear();
+  updateSelectionCounter();
 });
 
-function buildPreviewTable() {
-  const maxRows = 5;
-  let html = '<thead><tr>';
-  state.headers.forEach(h => { html += `<th>${escapeHtml(h)}</th>`; });
-  html += '</tr></thead><tbody>';
-
-  state.rows.slice(0, maxRows).forEach(row => {
-    html += '<tr>';
-    state.headers.forEach((_, i) => {
-      html += `<td title="${escapeHtml(row[i] || '')}">${escapeHtml(row[i] || '')}</td>`;
-    });
-    html += '</tr>';
-  });
-
-  if (state.rows.length > maxRows) {
-    html += `<tr><td colspan="${state.headers.length}" style="text-align:center;color:var(--text-muted);font-style:italic">... y ${state.rows.length - maxRows} filas más</td></tr>`;
-  }
-  html += '</tbody>';
-  previewTable.innerHTML = html;
-}
 
 // ── Title Paraphrasing Engine ──────────────────────────────
 const brandNameInput = document.getElementById('brandName');
@@ -437,39 +560,6 @@ function paraphraseText(text) {
 
 // ── AI-Style Brand Name Generator ──────────────────────────
 // Generates unique, premium-sounding brand names using syllable combinations
-const BRAND_PREFIXES = [
-  'Ve', 'Lu', 'Al', 'Ca', 'Do', 'Es', 'Fi', 'Ga', 'Ma', 'No',
-  'Or', 'Pa', 'Ra', 'Sa', 'To', 'Va', 'Ze', 'Ar', 'Be', 'Cr',
-  'De', 'El', 'Fo', 'Gi', 'Ha', 'In', 'La', 'Mi', 'Ni', 'Ro',
-  'Se', 'Vi', 'Mo', 'Le', 'An', 'Ba', 'Co', 'Di', 'Fe', 'Ge',
-];
-const BRAND_MIDDLES = [
-  'lan', 'ren', 'ros', 'vel', 'nar', 'ten', 'lor', 'ran', 'lin', 'ven',
-  'lar', 'ron', 'san', 'tan', 'van', 'zel', 'ras', 'len', 'mon', 'ner',
-  'ral', 'sel', 'tel', 'val', 'zen', 'ran', 'lon', 'men', 'nel', 'rel',
-  'sol', 'tor', 'ver', 'zar', 'ber', 'der', 'fer', 'ger', 'ker', 'mer',
-];
-const BRAND_SUFFIXES = [
-  'o', 'i', 'a', 'io', 'ia', 'ino', 'ello', 'ano', 'ero', 'ari',
-  'ini', 'oni', 'osi', 'anti', 'enti', 'é', 'ier', 'ón', 'és',
-  'otti', 'etti', 'ossi', 'elli', 'acci', 'ucci',
-];
-
-const usedBrandNames = new Set();
-
-function generateBrandName() {
-  let name;
-  let attempts = 0;
-  do {
-    const pre = BRAND_PREFIXES[Math.floor(Math.random() * BRAND_PREFIXES.length)];
-    const mid = BRAND_MIDDLES[Math.floor(Math.random() * BRAND_MIDDLES.length)];
-    const suf = BRAND_SUFFIXES[Math.floor(Math.random() * BRAND_SUFFIXES.length)];
-    name = pre + mid + suf;
-    attempts++;
-  } while (usedBrandNames.has(name) && attempts < 100);
-  usedBrandNames.add(name);
-  return name;
-}
 
 function enhanceTitle(translatedTitle) {
   // Detect what kind of product this is from the translated title
@@ -500,7 +590,7 @@ function enhanceTitle(translatedTitle) {
       break;
     }
   }
-  if (!garment) garment = 'Prenda';
+  if (!garment) garment = 'Producto';
 
   // Detect audience
   let audience = '';
@@ -534,15 +624,12 @@ function enhanceTitle(translatedTitle) {
   const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
   const style = STYLES[Math.floor(Math.random() * STYLES.length)];
 
-  // Generate brand
-  const brand = generateBrandName();
-
-  // Name patterns
+  // Name patterns (Removed Brand name as per user request)
   const PATTERNS = [
-    () => `${brand} - ${garment} ${adj} ${audience}`.trim(),
-    () => `${brand} | ${garment} ${style} ${audience}`.trim(),
-    () => `${brand} - ${garment} ${adj} · ${style}`,
-    () => `${brand} - ${adj} ${garment} ${audience}`.trim(),
+    () => `${garment} ${adj} ${audience}`.trim(),
+    () => `${garment} ${style} ${audience}`.trim(),
+    () => `${garment} ${adj} · ${style}`,
+    () => `${adj} ${garment} ${audience}`.trim(),
   ];
 
   const pattern = PATTERNS[Math.floor(Math.random() * PATTERNS.length)];
@@ -598,7 +685,6 @@ async function startTranslation() {
     ? state.headers.indexOf('Handle')
     : state.headers.indexOf('URL handle');
   const enhancedTitles = {}; // handle → enhanced title (so variants share the same title)
-  usedBrandNames.clear(); // reset for each translation run
 
   for (let i = 0; i < textsToTranslate.length; i += BATCH_SIZE) {
     const batch = textsToTranslate.slice(i, i + BATCH_SIZE);
@@ -631,6 +717,9 @@ async function startTranslation() {
     }
   }
 
+  // Increment Usage Stats for the user
+  incrementUsage(state.rows.length);
+
   showResult(total);
 }
 
@@ -651,32 +740,52 @@ async function translateText(text, langPair, retries = 3) {
 // Translate HTML content: preserve tags, translate only text between them
 async function translateHTML(html, langPair, retries) {
   // Split into HTML tags and text segments
-  // e.g. "<p>Hello</p>" → ["<p>", "Hello", "</p>"]
   const parts = html.split(/(<[^>]*>)/g);
-  const result = [];
+  const textSegments = [];
+  const textIndices = [];
 
-  for (const part of parts) {
-    if (!part) continue;
-    // If it's an HTML tag, keep it as-is
-    if (/^<[^>]*>$/.test(part)) {
-      result.push(part);
-    } else if (part.trim() === '') {
-      // Whitespace only, keep as-is
-      result.push(part);
-    } else {
-      // It's text content — translate it
-      const translated = await translatePlainText(part, langPair, retries);
-      result.push(translated);
+  // Identify segments that need translation
+  parts.forEach((part, idx) => {
+    if (part && !/^<[^>]*>$/.test(part) && part.trim() !== '') {
+      textSegments.push(part);
+      textIndices.push(idx);
     }
-  }
+  });
 
-  return result.join('');
+  if (textSegments.length === 0) return html;
+
+  // Batch translate segments using a unique delimiter
+  // We use " ||| " because Google Translate tends to preserve it
+  const delimiter = " ||| ";
+  const fullText = textSegments.join(delimiter);
+  const translatedBody = await translatePlainText(fullText, langPair, retries);
+
+  const translatedSegments = translatedBody.split(delimiter).map(s => s.trim());
+
+  // Reconstruct the HTML
+  textIndices.forEach((partIdx, i) => {
+    // If splitting failed (e.g. Google merged segments), we fallback to the original if bounds exceeded
+    parts[partIdx] = translatedSegments[i] || textSegments[i];
+  });
+
+  return parts.join('');
 }
 
 // Translate plain text (no HTML) via Google Translate with MyMemory fallback
 async function translatePlainText(text, langPair, retries = 3) {
   if (!text || text.trim() === '') return text;
   if (/^\d+([.,]\d+)?$/.test(text.trim())) return text;
+
+  // For very long texts (e.g. massive descriptions), chunk them to avoid URL length limits
+  const MAX_CHUNK = 2000;
+  if (text.length > MAX_CHUNK) {
+    const chunks = [];
+    for (let i = 0; i < text.length; i += MAX_CHUNK) {
+      chunks.push(text.substring(i, i + MAX_CHUNK));
+    }
+    const results = await Promise.all(chunks.map(c => translatePlainText(c, langPair, retries)));
+    return results.join('');
+  }
 
   const [sl, tl] = langPair.split('|');
 
@@ -701,6 +810,7 @@ async function translatePlainText(text, langPair, retries = 3) {
       }
     } catch (err) {
       console.warn(`Google Translate attempt ${attempt + 1} failed:`, err);
+      logError(`Google Translate (${sl}|${tl})`, err.message || 'Error de red');
     }
 
     // Fallback: MyMemory API
@@ -710,9 +820,12 @@ async function translatePlainText(text, langPair, retries = 3) {
       const data2 = await res2.json();
       if (data2.responseStatus === 200 && data2.responseData?.translatedText) {
         return data2.responseData.translatedText;
+      } else if (data2.responseStatus !== 200) {
+        logError('MyMemory API', data2.responseDetails || 'Error desconocido');
       }
     } catch (e) {
       console.warn('MyMemory fallback failed:', e);
+      logError('MyMemory Fallback', e.message || 'Error de conexión');
     }
 
     if (attempt < retries - 1) await sleep(1000);
@@ -857,6 +970,380 @@ function generateTags(row, titleIdx, typeIdx, opt1NameIdx, opt2NameIdx) {
   return '';
 }
 
+// ── Auth Logic (Mock) ───────────────────────────────────────
+function initAuth() {
+  const savedUser = localStorage.getItem('csv_translator_user');
+  if (savedUser) {
+    state.user = JSON.parse(savedUser);
+    updateAuthUI();
+  }
+}
+
+
+function updateAuthUI() {
+  if (state.user) {
+    loginBtn.classList.add('hidden');
+    userProfile.classList.remove('hidden');
+    userEmailDisplay.textContent = state.user.email;
+
+    // Update Plan Badge
+    const plan = state.user.plan;
+    userPlanBadge.textContent = plan === 'unlimited' ? 'Admin Ilimitado' : plan === 'pro' ? 'Plan Pro' : plan === 'business' ? 'Business' : 'Gratis';
+    userPlanBadge.className = 'plan-badge ' + (plan || 'free');
+  } else {
+    loginBtn.classList.remove('hidden');
+    userProfile.classList.add('hidden');
+    userEmailDisplay.textContent = '';
+  }
+
+  // Re-check limits for current state if we are in config step
+  if (!stepConfigure.classList.contains('hidden')) {
+    showConfigStep();
+  }
+}
+
+function checkUsageLimits(uniqueProducts) {
+  const plan = state.user?.plan || 'free';
+  if (plan === 'unlimited') {
+    translateBtn.disabled = false;
+    authWarning.classList.add('hidden');
+    return;
+  }
+  const limits = { free: 10, pro: 1000, business: 6000 };
+  const currentLimit = limits[plan];
+
+  if (uniqueProducts > currentLimit) {
+    translateBtn.disabled = true;
+    authWarning.classList.remove('hidden');
+
+    if (plan === 'free') {
+      if (!state.user) {
+        authWarningTitle.textContent = 'Límite de 10 productos superado';
+        authWarningText.innerHTML = 'Para traducir archivos de este tamaño necesitas estar registrado. <a href="#" id="authWarningLink">Inicia sesión aquí</a> o <a href="#" id="seePricingLink">ver planes de pago</a>.';
+        $('authWarningLink').onclick = (e) => { e.preventDefault(); loginBtn.click(); };
+        $('seePricingLink').onclick = (e) => { e.preventDefault(); pricingModal.classList.remove('hidden'); };
+      } else {
+        authWarningTitle.textContent = 'Límite de Plan Gratis superado';
+        authWarningText.innerHTML = 'Tu plan actual tiene un límite de 10 productos. <a href="#" id="upgradeLink">Sube a Pro para traducir hasta 1.000 productos</a>.';
+        $('upgradeLink').onclick = (e) => { e.preventDefault(); pricingModal.classList.remove('hidden'); };
+      }
+    } else {
+      authWarningTitle.textContent = `Límite de Plan ${plan.toUpperCase()} superado`;
+      authWarningText.innerHTML = `Este archivo tiene ${uniqueProducts} productos, superando tu límite de ${currentLimit}. <a href="#" id="upgradeLink">Contacta con soporte para ampliar</a>.`;
+      $('upgradeLink').onclick = (e) => { e.preventDefault(); alert('Contactando con soporte...'); };
+    }
+  } else {
+    translateBtn.disabled = false;
+    authWarning.classList.add('hidden');
+  }
+}
+
+// ── Usage Tracking ─────────────────────────────────────────
+function incrementUsage(count) {
+  if (state.user) {
+    state.user.usage = (state.user.usage || 0) + count;
+    state.user.filesProcessed = (state.user.filesProcessed || 0) + 1;
+    saveUserState();
+    updateAuthUI();
+  }
+}
+
+function saveUserState() {
+  if (state.user) {
+    localStorage.setItem('csv_translator_user', JSON.stringify(state.user));
+  }
+}
+
+const ADMIN_CREDENTIALS = {
+  email: 'esbabyjei@gmail.com',
+  password: 'qZ2B8cn8'
+};
+
+loginForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const email = $('loginEmail').value.trim();
+  const pass = $('loginPassword').value;
+
+  if (email === ADMIN_CREDENTIALS.email && pass === ADMIN_CREDENTIALS.password) {
+    state.user = {
+      email: email,
+      name: 'Super Admin',
+      plan: 'unlimited',
+      role: 'admin',
+      usage: 0,
+      filesProcessed: 0,
+      billingHistory: [],
+      regDate: new Date().toLocaleDateString(),
+      status: 'active'
+    };
+  } else {
+    // Normal user logic (Mock)
+    state.user = {
+      email: email,
+      plan: 'free',
+      role: 'user',
+      usage: 0,
+      filesProcessed: 0
+    };
+  }
+
+  localStorage.setItem('csv_translator_user', JSON.stringify(state.user));
+  loginModal.classList.add('hidden');
+  updateAuthUI();
+
+  // Also add to allUsers for admin management view
+  const allUsers = JSON.parse(localStorage.getItem('allUsers') || '[]');
+  if (!allUsers.find(u => u.email === email)) {
+    allUsers.push(state.user);
+    localStorage.setItem('allUsers', JSON.stringify(allUsers));
+  }
+});
+
+// Restore Dashboard Handlers
+miCuentaBtn.onclick = () => {
+  if (!state.user) return;
+  updateDashboardUI();
+  dashboardModal.classList.remove('hidden');
+};
+
+closeDashboardModal.onclick = () => dashboardModal.classList.add('hidden');
+
+dashNavItems.forEach(item => {
+  item.onclick = () => {
+    currentDashView = item.dataset.view;
+    updateDashboardUI();
+  };
+});
+
+function updateDashboardUI() {
+  if (!state.user) return;
+
+  dashEmail.textContent = state.user.email;
+  const plan = state.user.plan;
+  const planName = plan === 'unlimited' ? 'Admin Ilimitado' : plan === 'pro' ? 'Plan Pro' : plan === 'business' ? 'Business' : 'Gratis';
+  dashPlan.textContent = planName;
+  dashPlan.className = 'badge-sub ' + (plan || 'free');
+
+  // Navigation
+  dashNavItems.forEach(i => i.classList.toggle('active', i.dataset.view === currentDashView));
+  dashViews.forEach(v => v.classList.toggle('hidden', v.id !== `dashView-${currentDashView}`));
+
+  // Stats
+  const currentPlan = state.user.plan || 'free';
+  const limits = { free: 10, pro: 1000, business: 6000, unlimited: Infinity };
+  const max = limits[currentPlan];
+  const current = state.user.usage || 0;
+
+  if (plan === 'unlimited') {
+    usageCount.textContent = `${current.toLocaleString()} / ∞`;
+    usageBarFill.style.width = '0%'; // Or 100% depending on preference, Infinity is tricky
+  } else {
+    usageCount.textContent = `${current.toLocaleString()} / ${max.toLocaleString()}`;
+    const pct = Math.min(100, (current / max) * 100);
+    usageBarFill.style.width = pct + '%';
+  }
+  dashFilesCount.textContent = state.user.filesProcessed || 0;
+
+  // Show/Hide Upgrade/Cancel buttons based on plan
+  if (state.user.plan === 'business') {
+    dashUpgradeContainer.classList.add('hidden');
+    dashUpgradeBtn.classList.add('hidden');
+    cancelSubBtn.classList.remove('hidden');
+  } else if (state.user.plan === 'pro') {
+    dashUpgradeContainer.classList.remove('hidden');
+    dashUpgradeBtn.classList.remove('hidden');
+    cancelSubBtn.classList.remove('hidden');
+  } else {
+    // Free
+    dashUpgradeContainer.classList.remove('hidden');
+    dashUpgradeBtn.classList.remove('hidden');
+    cancelSubBtn.classList.add('hidden');
+  }
+
+  // Show/Hide Admin Tab
+  if (state.user.role === 'admin') {
+    navAdmin.classList.remove('hidden');
+    if (currentDashView === 'admin') updateAdminDash();
+  } else {
+    navAdmin.classList.add('hidden');
+    if (currentDashView === 'admin') currentDashView = 'stats';
+  }
+
+  // Billing History
+  const historyBody = document.querySelector('#billingHistory tbody');
+  if (historyBody) {
+    historyBody.innerHTML = (state.user.billingHistory || []).map(h => `
+      <tr>
+        <td>${h.date}</td>
+        <td>Suscripción ${h.plan}</td>
+        <td><span class="badge-sub" style="background:#059669;color:white;padding:2px 8px;border-radius:10px">Pagado</span></td>
+        <td>${h.amount}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="4" class="center muted">Sin transacciones</td></tr>';
+  }
+}
+
+// ── Payment Logic (Mock Stripe) ──────────────────────────────
+function handleUpgrade(plan) {
+  if (!state.user) {
+    alert('Por favor, inicia sesión para suscribirte.');
+    pricingModal.classList.add('hidden');
+    loginBtn.click();
+    return;
+  }
+  pendingPlanUpgrade = plan;
+  pricingModal.classList.add('hidden');
+  paymentModal.classList.remove('hidden');
+}
+
+closePaymentModal.onclick = () => paymentModal.classList.add('hidden');
+
+// Card Formatting
+cardNumber.oninput = (e) => {
+  let v = e.target.value.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
+  let parts = [];
+  for (let i = 0, len = v.length; i < len; i += 4) {
+    parts.push(v.substring(i, i + 4));
+  }
+  if (parts.length) e.target.value = parts.join(' ');
+};
+
+cardExpiry.oninput = (e) => {
+  let v = e.target.value.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
+  if (v.length >= 2) e.target.value = v.substring(0, 2) + '/' + v.substring(2, 4);
+};
+
+paymentForm.onsubmit = async (e) => {
+  e.preventDefault();
+  paymentError.classList.add('hidden');
+  paymentBtnText.classList.add('hidden');
+  paymentSpinner.classList.remove('hidden');
+
+  // Simulate Network Delay (Stripe-like)
+  await new Promise(r => setTimeout(r, 2000));
+
+  const plan = pendingPlanUpgrade;
+  const prices = { pro: '$29,99', business: '$99,99' };
+
+  // Success
+  state.user.plan = plan;
+  state.user.billingHistory = state.user.billingHistory || [];
+  state.user.billingHistory.unshift({
+    date: new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }),
+    plan: plan.toUpperCase(),
+    amount: prices[plan]
+  });
+
+  saveUserState();
+  updateAuthUI();
+
+  paymentSpinner.classList.add('hidden');
+  paymentBtnText.classList.remove('hidden');
+  paymentModal.classList.add('hidden');
+  alert(`¡Pago exitoso! Bienvenido al Plan ${plan.toUpperCase()}`);
+};
+
+// ── Auth Logic (Mock) ───────────────────────────────────────
+function initAuth() {
+  const savedUser = localStorage.getItem('csv_translator_user');
+  if (savedUser) {
+    state.user = JSON.parse(savedUser);
+    updateAuthUI();
+  }
+}
+
+loginBtn.onclick = () => {
+  currentAuthTab = 'login';
+  updateAuthModalUI();
+  authModal.classList.remove('hidden');
+};
+
+authWarningLink.onclick = (e) => {
+  e.preventDefault();
+  loginBtn.click();
+};
+
+closeAuthModal.onclick = () => authModal.classList.add('hidden');
+
+authTabs.forEach(tab => {
+  tab.onclick = () => {
+    currentAuthTab = tab.dataset.tab;
+    updateAuthModalUI();
+  };
+});
+
+function updateAuthModalUI() {
+  authTabs.forEach(t => t.classList.toggle('active', t.dataset.tab === currentAuthTab));
+  authSubmitBtn.textContent = currentAuthTab === 'login' ? 'Iniciar Sesión' : 'Crear Cuenta';
+  authError.classList.add('hidden');
+}
+
+authForm.onsubmit = (e) => {
+  e.preventDefault();
+  const email = authEmail.value;
+  const password = authPassword.value;
+
+  if (password.length < 6) {
+    authError.textContent = 'La contraseña debe tener al menos 6 caracteres';
+    authError.classList.remove('hidden');
+    return;
+  }
+
+  // Mock Success
+  const existingUser = JSON.parse(localStorage.getItem('csv_translator_user'));
+  const plan = currentAuthTab === 'login' ? (existingUser?.plan || 'free') : 'free';
+  const role = email === 'admin@example.com' ? 'admin' : 'user';
+
+  state.user = {
+    email,
+    plan,
+    role,
+    usage: existingUser?.usage || 0,
+    filesProcessed: existingUser?.filesProcessed || 0,
+    billingHistory: existingUser?.billingHistory || [],
+    regDate: existingUser?.regDate || new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })
+  };
+
+  saveUserState();
+  updateAuthUI();
+  authModal.classList.add('hidden');
+  authForm.reset();
+};
+
+logoutBtn.onclick = () => {
+  state.user = null;
+  localStorage.removeItem('csv_translator_user');
+  updateAuthUI();
+};
+
+// Initialize
+initAuth();
+
+// ── Subscription Logic ──────────────────────────────────────
+upgradeBtns.forEach(btn => {
+  btn.onclick = () => {
+    const plan = btn.dataset.plan;
+    handleUpgrade(plan);
+  };
+});
+
+dashUpgradeBtn.onclick = () => {
+  dashboardModal.classList.add('hidden');
+  pricingModal.classList.remove('hidden');
+};
+
+cancelSubBtn.onclick = () => {
+  if (confirm('¿Estás seguro de que quieres cancelar tu suscripción? Volverás al Plan Gratis.')) {
+    state.user.plan = 'free';
+    saveUserState();
+    updateAuthUI();
+    updateDashboardUI();
+    alert('Tu suscripción ha sido cancelada.');
+  }
+};
+
+closePricingModal.onclick = () => pricingModal.classList.add('hidden');
+
 downloadBtn.addEventListener('click', downloadCSV);
 
 function buildCSVContent() {
@@ -874,10 +1361,17 @@ function buildCSVContent() {
 
   const rows = state.translatedRows.map(row => {
     const r = [...row];
-    if (vendorIdx >= 0) r[vendorIdx] = 'Rovelli Maison';
+    if (vendorIdx >= 0) r[vendorIdx] = brandNameInput.value || 'Rovelli Maison';
 
-    // Generate relevant tags based on product data
-    if (tagsIdx >= 0) {
+    // Clear metadata columns if they are not selected
+    state.headers.forEach((h, i) => {
+      if (SHOPIFY_CLEARED_COLS.has(h) && !state.selectedCols.has(i)) {
+        r[i] = '';
+      }
+    });
+
+    // Generate relevant tags based on product data (only if Tags column is active)
+    if (tagsIdx >= 0 && state.selectedCols.has(tagsIdx)) {
       const tags = generateTags(r, titleIdx, typeIdx, opt1NameIdx, opt2NameIdx);
       r[tagsIdx] = tags;
     }
@@ -975,6 +1469,315 @@ startOverBtn.addEventListener('click', () => {
   resetUpload();
 });
 
+// ── Helpers ────────────────────────────────────────────────
+// ── Admin Logic ───────────────────────────────────────────
+function updateAdminDash() {
+  const allUsers = JSON.parse(localStorage.getItem('allUsers') || '[]');
+
+  // Stats calculation
+  let mrr = 0;
+  let proCount = 0;
+  let bizCount = 0;
+  let freeCount = 0;
+
+  allUsers.forEach(u => {
+    if (u.plan === 'pro') { mrr += 29.99; proCount++; }
+    else if (u.plan === 'business') { mrr += 99.99; bizCount++; }
+    else { freeCount++; }
+  });
+
+  adminMRR.textContent = `$${mrr.toFixed(2)}`;
+  adminUserRatios.textContent = `${proCount} Pro / ${bizCount} Biz`;
+
+  // User Table
+  const userBody = adminUserTable.querySelector('tbody');
+  userBody.innerHTML = allUsers.map(u => `
+    <tr>
+      <td>
+        <div class="user-info">
+          <strong>${u.email}</strong>
+          <span class="xsmall muted">${u.name || 'Sin nombre'}</span>
+        </div>
+      </td>
+      <td><span class="badge-role ${u.role}">${u.role}</span></td>
+      <td>${u.regDate || 'N/A'}</td>
+      <td><span class="badge-status ${u.status === 'banned' ? 'banned' : 'active'}">${u.status === 'banned' ? 'Baneado' : 'Activo'}</span></td>
+      <td>
+        ${u.status === 'banned'
+      ? `<button class="btn-text" onclick="activateUser('${u.email}')">Reactivar</button>`
+      : `<button class="btn-text danger" onclick="banUser('${u.email}')">Banear</button>`}
+      </td>
+    </tr>
+  `).join('');
+
+  // Abuse Detection
+  const alerts = [];
+  allUsers.forEach(u => {
+    if (u.usage > 900) { // arbitrary >90% of a 1000 plan for demo
+      alerts.push({ type: 'Uso Crítico', user: u.email, detail: 'Consumo superior al 90% del límite mensual.' });
+    }
+    if (u.ips && u.ips.length > 3) {
+      alerts.push({ type: 'Multi-IP', user: u.email, detail: `Inicios de sesión desde ${u.ips.length} direcciones distintas.` });
+    }
+  });
+
+  abuseAlerts.innerHTML = alerts.map(a => `
+    <div class="abuse-card">
+      <div class="abuse-icon">⚠️</div>
+      <div class="abuse-content">
+        <h4>${a.type}: ${a.user}</h4>
+        <p>${a.detail}</p>
+      </div>
+    </div>
+  `).join('') || '<p class="muted center">No hay alertas activas</p>';
+
+  // Mock Failed Payments
+  const failedBody = adminFailedPayments.querySelector('tbody');
+  failedBody.innerHTML = `
+    <tr><td>20 Feb, 10:45</td><td>john@doe.com</td><td>Fondos insuficientes</td></tr>
+    <tr><td>19 Feb, 14:20</td><td>jane@test.nl</td><td>Tarjeta expirada</td></tr>
+  `;
+}
+
+window.banUser = (email) => {
+  const allUsers = JSON.parse(localStorage.getItem('allUsers') || '[]');
+  const user = allUsers.find(u => u.email === email);
+  if (user) {
+    user.status = 'banned';
+    localStorage.setItem('allUsers', JSON.stringify(allUsers));
+    updateAdminDash();
+  }
+};
+
+window.activateUser = (email) => {
+  const allUsers = JSON.parse(localStorage.getItem('allUsers') || '[]');
+  const user = allUsers.find(u => u.email === email);
+  if (user) {
+    user.status = 'active';
+    localStorage.setItem('allUsers', JSON.stringify(allUsers));
+    updateAdminDash();
+  }
+};
+
+function seedUsers() {
+  if (localStorage.getItem('allUsers')) return;
+  const mockUsers = [
+    { email: 'admin@example.com', role: 'admin', plan: 'business', status: 'active', regDate: '01 Ene, 2026', name: 'Jefe Admin' },
+    { email: 'user1@test.com', role: 'user', plan: 'pro', status: 'active', regDate: '10 Feb, 2026', name: 'Alfonso Pérez', usage: 950 },
+    { email: 'user2@test.com', role: 'user', plan: 'free', status: 'banned', regDate: '12 Feb, 2026', name: 'Banned Guy' },
+    { email: 'scammer@test.com', role: 'user', plan: 'business', status: 'active', regDate: '15 Feb, 2026', name: 'Multi IP User', ips: ['1.1.1.1', '2.2.2.2', '3.3.3.3', '4.4.4.4'] },
+  ];
+  localStorage.setItem('allUsers', JSON.stringify(mockUsers));
+}
+
+seedUsers();
+updateAdminDash();
+renderFaqManager();
+
+// ── Admin Dash Expansion ──────────────────────────────────
+function updateAdminDash() {
+  const allUsers = JSON.parse(localStorage.getItem('allUsers') || '[]');
+
+  // Stats calculation
+  let mrr = 0;
+  let proCount = 0;
+  let bizCount = 0;
+  let freeCount = 0;
+
+  allUsers.forEach(u => {
+    if (u.plan === 'pro') { mrr += 29.99; proCount++; }
+    else if (u.plan === 'business') { mrr += 99.99; bizCount++; }
+    else { freeCount++; }
+  });
+
+  adminMRR.textContent = `$${mrr.toFixed(2)}`;
+  adminUserRatios.textContent = `${proCount} Pro / ${bizCount} Biz`;
+
+  // User Table
+  const userBody = adminUserTable.querySelector('tbody');
+  userBody.innerHTML = allUsers.map(u => `
+    <tr>
+      <td>
+        <div class="user-info">
+          <strong>${u.email}</strong>
+          <span class="xsmall muted">${u.name || 'Sin nombre'}</span>
+        </div>
+      </td>
+      <td><span class="badge-role ${u.role}">${u.role}</span></td>
+      <td>${u.regDate || 'N/A'}</td>
+      <td><span class="badge-status ${u.status === 'banned' ? 'banned' : 'active'}">${u.status === 'banned' ? 'Baneado' : 'Activo'}</span></td>
+      <td>
+        ${u.status === 'banned'
+      ? `<button class="btn-text" onclick="activateUser('${u.email}')">Reactivar</button>`
+      : `<button class="btn-text danger" onclick="banUser('${u.email}')">Banear</button>`}
+      </td>
+    </tr>
+  `).join('');
+
+  // Abuse Detection
+  const alerts = [];
+  allUsers.forEach(u => {
+    if (u.usage > 900) {
+      alerts.push({ type: 'Uso Crítico', user: u.email, detail: 'Consumo superior al 90% del límite mensual.' });
+    }
+    if (u.ips && u.ips.length > 3) {
+      alerts.push({ type: 'Multi-IP', user: u.email, detail: `Inicios de sesión desde ${u.ips.length} direcciones distintas.` });
+    }
+  });
+
+  abuseAlerts.innerHTML = alerts.map(a => `
+    <div class="abuse-card">
+      <div class="abuse-icon">⚠️</div>
+      <div class="abuse-content">
+        <h4>${a.type}: ${a.user}</h4>
+        <p>${a.detail}</p>
+      </div>
+    </div>
+  `).join('') || '<p class="muted center">No hay alertas activas</p>';
+
+  // Mock Failed Payments
+  const failedBody = adminFailedPayments.querySelector('tbody');
+  failedBody.innerHTML = `
+    <tr><td>20 Feb, 10:45</td><td>john@doe.com</td><td>Fondos insuficientes</td></tr>
+    <tr><td>19 Feb, 14:20</td><td>jane@test.nl</td><td>Tarjeta expirada</td></tr>
+  `;
+
+  // Update Logs
+  updateLogsTable();
+}
+
+/**
+ * Centered error logger for the whole application.
+ * Persists errors in localStorage for Admin view.
+ */
+function logError(url, errorMsg) {
+  const logs = JSON.parse(localStorage.getItem('system_logs') || '[]');
+  const now = new Date();
+  const newLog = {
+    time: now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+    url: url,
+    error: errorMsg,
+    user: state.user?.email || 'Huésped',
+    timestamp: now.getTime()
+  };
+
+  // Keep only the last 50 logs
+  logs.unshift(newLog);
+  if (logs.length > 50) logs.pop();
+
+  localStorage.setItem('system_logs', JSON.stringify(logs));
+
+  // If we are currently in the Admin view, refresh it
+  if (currentDashView === 'admin') updateLogsTable();
+}
+
+function updateLogsTable() {
+  const filter = logFilter.value;
+  let logs = JSON.parse(localStorage.getItem('system_logs') || '[]');
+
+  // If empty, show some initial mock help if it's the first time
+  if (logs.length === 0) {
+    logs = [
+      { time: '12:45', url: '/api/translate', error: 'Ejemplo: Error de red', user: 'admin@example.com', timestamp: Date.now() - 15 * 60000 }
+    ];
+  }
+
+  if (filter === '1h') {
+    logs = logs.filter(l => l.timestamp > Date.now() - 3600000);
+  } else if (filter === '24h') {
+    logs = logs.filter(l => l.timestamp > Date.now() - 86400000);
+  }
+
+  const logBody = adminLogsTable.querySelector('tbody');
+  logBody.innerHTML = logs.map(l => `
+    <tr>
+      <td>${l.time}</td>
+      <td><code class="xsmall">${l.url}</code></td>
+      <td><span class="danger">${l.error}</span></td>
+      <td>${l.user}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="4" class="center muted">Sin errores en este periodo</td></tr>';
+}
+
+logFilter.onchange = updateLogsTable;
+
+// ── FAQ Manager ───────────────────────────────────────────
+let editingFaqId = null;
+
+function renderFaqManager() {
+  const faqs = JSON.parse(localStorage.getItem('faqs') || '[]');
+  if (faqs.length === 0 && !localStorage.getItem('faqs')) {
+    // Default FAQs
+    const defaults = [
+      { id: Date.now(), q: '¿Es seguro subir mis archivos?', a: 'Sí, los archivos se procesan en el navegador o se eliminan tras la traducción.' },
+      { id: Date.now() + 1, q: '¿Qué formatos soportan?', a: 'Soportamos archivos CSV estándar y exportaciones de Shopify.' }
+    ];
+    localStorage.setItem('faqs', JSON.stringify(defaults));
+    return renderFaqManager();
+  }
+
+  faqManagerList.innerHTML = faqs.map(f => `
+    <div class="faq-manager-item">
+      <h4>
+        ${f.q}
+        <div class="faq-actions">
+          <button class="btn-text btn-sm" onclick="editFaq(${f.id})">Editar</button>
+          <button class="btn-text danger btn-sm" onclick="deleteFaq(${f.id})">Borrar</button>
+        </div>
+      </h4>
+      <p>${f.a}</p>
+    </div>
+  `).join('') || '<p class="muted center">No hay preguntas configuradas</p>';
+}
+
+window.editFaq = (id) => {
+  const faqs = JSON.parse(localStorage.getItem('faqs') || '[]');
+  const faq = faqs.find(f => f.id === id);
+  if (faq) {
+    editingFaqId = id;
+    faqModalTitle.textContent = 'Editar Pregunta';
+    faqQuestionInput.value = faq.q;
+    faqAnswerInput.value = faq.a;
+    faqModal.classList.remove('hidden');
+  }
+};
+
+window.deleteFaq = (id) => {
+  if (confirm('¿Borrar esta pregunta?')) {
+    let faqs = JSON.parse(localStorage.getItem('faqs') || '[]');
+    faqs = faqs.filter(f => f.id !== id);
+    localStorage.setItem('faqs', JSON.stringify(faqs));
+    renderFaqManager();
+  }
+};
+
+addFaqBtn.onclick = () => {
+  editingFaqId = null;
+  faqModalTitle.textContent = 'Nueva Pregunta';
+  faqQuestionInput.value = '';
+  faqAnswerInput.value = '';
+  faqModal.classList.remove('hidden');
+};
+
+closeFaqModal.onclick = () => faqModal.classList.add('hidden');
+
+saveFaqBtn.onclick = () => {
+  const q = faqQuestionInput.value.trim();
+  const a = faqAnswerInput.value.trim();
+  if (!q || !a) return alert('Rellena todos los campos');
+
+  let faqs = JSON.parse(localStorage.getItem('faqs') || '[]');
+  if (editingFaqId) {
+    const f = faqs.find(item => item.id === editingFaqId);
+    if (f) { f.q = q; f.a = a; }
+  } else {
+    faqs.push({ id: Date.now(), q, a });
+  }
+
+  localStorage.setItem('faqs', JSON.stringify(faqs));
+  faqModal.classList.add('hidden');
+  renderFaqManager();
+};
 // ── Helpers ────────────────────────────────────────────────
 function escapeHtml(str) {
   return String(str ?? '')

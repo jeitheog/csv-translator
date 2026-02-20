@@ -33,6 +33,19 @@
       <span class="logo-icon">🌐</span>
       <span class="logo-text">CSV<span class="accent">Español</span></span>
     </div>
+    <div class="user-menu" id="userMenu">
+      <button class="btn btn-outline btn-sm" id="loginBtn">
+        <span class="btn-icon-left">👤</span> Iniciar Sesión / Registrarse
+      </button>
+      <div class="user-profile hidden" id="userProfile">
+        <span class="plan-badge" id="userPlanBadge">Gratis</span>
+        <button class="user-email-btn" id="miCuentaBtn">
+          <span id="userEmailDisplay"></span>
+          <span class="chevron-down">▼</span>
+        </button>
+        <button class="btn-icon" id="logoutBtn" title="Cerrar Sesión">🚪</button>
+      </div>
+    </div>
     <p class="tagline">Traduce tus archivos CSV al español en segundos</p>
   </header>
 
@@ -62,6 +75,24 @@
       <div class="step-badge">2</div>
       <h2>Configura la traducción</h2>
 
+      <!-- Stats Display -->
+      <div class="stats-container" id="statsContainer">
+        <div class="stat-card">
+          <span class="stat-icon">📦</span>
+          <div class="stat-info">
+            <span class="stat-value" id="countProducts">-</span>
+            <span class="stat-label">Productos únicos</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <span class="stat-icon">📑</span>
+          <div class="stat-info">
+            <span class="stat-value" id="countVariants">-</span>
+            <span class="stat-label">Variantes totales</span>
+          </div>
+        </div>
+      </div>
+
       <div class="config-row">
         <label class="config-label">Idioma de origen</label>
         <select id="sourceLang" class="select">
@@ -76,20 +107,32 @@
       </div>
 
       <div class="config-row">
-        <label class="config-label">🏷️ Nombre de tu marca (para títulos)</label>
-        <p class="config-hint">Se reemplazará la marca original y se mejorará el título con palabras atractivas</p>
+        <label class="config-label">🏷️ Nombre del Vendedor (Shopify Vendor)</label>
+        <p class="config-hint">Este nombre se aplicará a la columna "Vendor" en el archivo exportado</p>
         <input type="text" id="brandName" class="select" placeholder="Ej: Rovelli Maison" value="Rovelli Maison"
           style="width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);color:#fff;font-size:0.95rem;" />
-
       </div>
 
       <div class="config-row">
-        <label class="config-label">Columnas a traducir</label>
+        <div class="config-label-row">
+          <label class="config-label">Columnas a traducir</label>
+          <span class="selection-counter" id="selectedCount">0 seleccionadas</span>
+        </div>
         <p class="config-hint">Selecciona las columnas que contienen texto a traducir</p>
         <div class="columns-grid" id="columnsGrid"></div>
         <div class="columns-actions">
           <button class="btn-text" id="selectAll">Seleccionar todas</button>
           <button class="btn-text" id="deselectAll">Deseleccionar todas</button>
+        </div>
+      </div>
+
+      <!-- Auth Restriction Warning -->
+      <div id="authWarning" class="auth-warning hidden">
+        <span class="warning-icon">⚠️</span>
+        <div class="warning-text">
+          <strong id="authWarningTitle">Límite de 10 productos superado</strong>
+          <p id="authWarningText">Para traducir archivos de este tamaño necesitas estar registrado. <a href="#"
+              id="authWarningLink">Inicia sesión aquí</a>.</p>
         </div>
       </div>
 
@@ -148,6 +191,329 @@
 
   </main>
 
+  <!-- MODALS -->
+  <div class="modal-overlay hidden" id="authModal">
+    <div class="card auth-card">
+      <button class="btn-icon close-modal" id="closeAuthModal">✕</button>
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-tab="login">Iniciar Sesión</button>
+        <button class="auth-tab" data-tab="register">Registrarse</button>
+      </div>
+
+      <form id="authForm" class="auth-form">
+        <div class="form-group">
+          <label>Correo Electrónico</label>
+          <input type="email" id="authEmail" class="input-field" placeholder="ejemplo@correo.com" required>
+        </div>
+        <div class="form-group">
+          <label>Contraseña</label>
+          <input type="password" id="authPassword" class="input-field" placeholder="••••••••" required>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full" id="authSubmitBtn">Continuar</button>
+        <p id="authError" class="error-text hidden"></p>
+      </form>
+    </div>
+  </div>
+
+  <!-- Pricing Modal -->
+  <div class="modal-overlay hidden" id="pricingModal">
+    <div class="card pricing-card-lg">
+      <button class="btn-icon close-modal" id="closePricingModal">✕</button>
+      <h2 class="center">Elige tu Plan</h2>
+      <p class="muted center mb-2">Traduce archivos ilimitados y mejora tus ventas</p>
+
+      <div class="pricing-grid">
+        <!-- Free -->
+        <div class="pricing-tier">
+          <h3>Gratis</h3>
+          <div class="price">$0 <span>/ siempre</span></div>
+          <ul class="features">
+            <li>✅ Hasta 10 productos</li>
+            <li>✅ Etiquetas inteligentes</li>
+            <li>✅ Soporte comunitario</li>
+          </ul>
+          <button class="btn btn-outline btn-full" disabled>Plan Actual</button>
+        </div>
+
+        <!-- Pro -->
+        <div class="pricing-tier popular">
+          <div class="badge-popular">RECOMENDADO</div>
+          <h3>Plan Pro</h3>
+          <div class="price">$29,99 <span>/ mes</span></div>
+          <ul class="features">
+            <li>✅ **Hasta 1.000 productos/mes**</li>
+            <li>✅ AI Paráfrasis Avanzada</li>
+            <li>✅ Soporte Prioritario</li>
+          </ul>
+          <button class="btn btn-primary btn-full upgrade-btn" data-plan="pro">Subir a Pro</button>
+        </div>
+
+        <!-- Business -->
+        <div class="pricing-tier">
+          <h3>Business</h3>
+          <div class="price">$99,99 <span>/ mes</span></div>
+          <ul class="features">
+            <li>✅ **Hasta 6.000 productos/mes**</li>
+            <li>✅ Branding Personalizado</li>
+            <li>✅ Soporte 24/7 VIP</li>
+          </ul>
+          <button class="btn btn-outline btn-full upgrade-btn" data-plan="business">Subir a Business</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Credit Card Payment Modal -->
+  <div class="modal-overlay hidden" id="paymentModal">
+    <div class="card payment-card">
+      <button class="btn-icon close-modal" id="closePaymentModal">✕</button>
+      <div class="payment-header">
+        <div class="payment-logo">STRP</div>
+        <h3>Detalles de Pago</h3>
+      </div>
+
+      <form class="payment-form" id="paymentForm">
+        <div class="form-group">
+          <label>Titular de la tarjeta</label>
+          <input type="text" id="cardName" class="select" placeholder="Nombre completo" required>
+        </div>
+
+        <div class="form-group">
+          <label>Número de tarjeta</label>
+          <div class="card-input-wrapper">
+            <input type="text" id="cardNumber" class="select" placeholder="0000 0000 0000 0000" maxlength="19" required>
+            <span class="card-type-icon">💳</span>
+          </div>
+        </div>
+
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Expiración</label>
+            <input type="text" id="cardExpiry" class="select" placeholder="MM/YY" maxlength="5" required>
+          </div>
+          <div class="form-group">
+            <label>CVC</label>
+            <input type="text" id="cardCvc" class="select" placeholder="123" maxlength="3" required>
+          </div>
+        </div>
+
+        <div id="paymentError" class="error-text hidden"></div>
+
+        <button type="submit" class="btn btn-primary btn-full" id="confirmPaymentBtn">
+          <span id="paymentBtnText">Pagar Ahora</span>
+          <div id="paymentSpinner" class="spinner hidden"></div>
+        </button>
+
+        <p class="muted center xsmall mt-1">🔒 Transacción segura y encriptada</p>
+      </form>
+    </div>
+  </div>
+
+  <!-- Customer Dashboard -->
+  <div class="modal-overlay hidden" id="dashboardModal">
+    <div class="card dashboard-card">
+      <button class="btn-icon close-modal" id="closeDashboardModal">✕</button>
+
+      <div class="dashboard-layout">
+        <aside class="dashboard-sidebar">
+          <div class="sidebar-user">
+            <div class="user-avatar" id="userAvatar"></div>
+            <div class="user-info">
+              <strong id="dashEmail">user@example.com</strong>
+              <span id="dashPlan" class="badge-sub">Plan Pro</span>
+            </div>
+          </div>
+          <nav class="sidebar-nav">
+            <button class="nav-item active" data-view="stats">📊 Resumen de Uso</button>
+            <button class="nav-item" data-view="billing">💳 Facturación</button>
+            <button class="nav-item" data-view="settings">⚙️ Configuración</button>
+            <button class="nav-item hidden" id="navAdmin" data-view="admin">🛡️ Panel Admin</button>
+          </nav>
+        </aside>
+
+        <main class="dashboard-main">
+          <!-- View: Stats -->
+          <div id="dashView-stats" class="dash-view">
+            <h2>Resumen de Uso</h2>
+            <p class="muted">Aquí puedes ver tu consumo de productos traducidos este mes.</p>
+
+            <div class="usage-meter mt-2">
+              <div class="meter-info">
+                <span>Productos Traducidos</span>
+                <span id="usageCount">0 / 1.000</span>
+              </div>
+              <div class="meter-bar">
+                <div class="meter-fill" id="usageBarFill" style="width: 0%"></div>
+              </div>
+            </div>
+
+            <div class="stats-grid mt-2">
+              <div class="dash-stat-card">
+                <span class="stat-label">Archivos procesados</span>
+                <strong id="dashFilesCount">0</strong>
+              </div>
+              <div class="dash-stat-card">
+                <span class="stat-label">Días restantes</span>
+                <strong id="dashDaysLeft">24</strong>
+              </div>
+            </div>
+
+            <div class="dash-actions mt-2" id="dashUpgradeContainer">
+              <button class="btn btn-primary btn-full"
+                onclick="pricingModal.classList.remove('hidden'); dashboardModal.classList.add('hidden');">✨ Mejorar
+                Plan</button>
+            </div>
+          </div>
+
+          <!-- View: Billing -->
+          <div id="dashView-billing" class="dash-view hidden">
+            <h2>Facturación</h2>
+            <div class="billing-current mt-2">
+              <div class="billing-card">
+                <div class="billing-info">
+                  <span>Próximo cobro</span>
+                  <strong id="nextBillDate">15 Abr, 2026</strong>
+                </div>
+                <div class="billing-info">
+                  <span>Monto</span>
+                  <strong id="nextBillAmount">$29,99</strong>
+                </div>
+                <div class="billing-actions mt-1">
+                  <button class="btn btn-primary" id="dashUpgradeBtn">Mejorar Plan</button>
+                  <button class="btn-text danger" id="cancelSubBtn">Cancelar Suscripción</button>
+                </div>
+              </div>
+            </div>
+
+            <h3 class="mt-2">Historial de Transacciones</h3>
+            <div class="history-table-wrapper mt-1">
+              <table class="history-table" id="billingHistory">
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Concepto</th>
+                    <th>Estado</th>
+                    <th>Monto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Injected via JS -->
+                </tbody>
+              </table>
+            </div>
+
+          </div>
+      </div>
+
+      <!-- View: Settings -->
+      <div id="dashView-settings" class="dash-view hidden">
+        <h2>Configuración</h2>
+        <div class="form-group mt-2">
+          <label>Notificaciones</label>
+          <div class="toggle-group">
+            <input type="checkbox" id="notifyEmails" checked>
+            <span>Recibir informes semanales por email</span>
+          </div>
+        </div>
+        <button class="btn btn-outline" id="changePassBtn">Cambiar Contraseña</button>
+      </div>
+
+      <!-- View: Admin -->
+      <div id="dashView-admin" class="dash-view hidden">
+        <div class="admin-header">
+          <h2>Panel de Administración</h2>
+          <div class="admin-stats-row">
+            <div class="admin-stat-card">
+              <span class="stat-label">Ingresos (MRR)</span>
+              <strong id="adminMRR">$0</strong>
+            </div>
+            <div class="admin-stat-card">
+              <span class="stat-label">Usuarios Pro/Biz</span>
+              <strong id="adminUserRatios">0 / 0</strong>
+            </div>
+          </div>
+        </div>
+
+        <h3 class="mt-2">Alertas de Abuso</h3>
+        <div id="abuseAlerts" class="abuse-grid mt-1">
+          <!-- Injected via JS -->
+        </div>
+
+        <h3 class="mt-2">Gestión de Usuarios</h3>
+        <div class="history-table-wrapper mt-1">
+          <table class="history-table" id="adminUserTable">
+            <thead>
+              <tr>
+                <th>Usuario</th>
+                <th>Rol</th>
+                <th>Registro</th>
+                <th>Estado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Injected via JS -->
+            </tbody>
+          </table>
+        </div>
+
+        <h3 class="mt-2">Pagos Fallidos Recientes</h3>
+        <div class="history-table-wrapper mt-1">
+          <table class="history-table" id="adminFailedPayments">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Usuario</th>
+                <th>Error</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Injected via JS -->
+            </tbody>
+          </table>
+        </div>
+
+        <div class="admin-section-grid mt-2">
+          <div class="admin-section">
+            <h3>Logs de Sistema (Errores 500)</h3>
+            <div class="logs-filter mt-1">
+              <select id="logFilter">
+                <option value="1h">Última hora</option>
+                <option value="24h">Últimas 24h</option>
+                <option value="all">Todo</option>
+              </select>
+            </div>
+            <div class="history-table-wrapper mt-1">
+              <table class="history-table" id="adminLogsTable">
+                <thead>
+                  <tr>
+                    <th>Hora</th>
+                    <th>URL</th>
+                    <th>Error</th>
+                    <th>User ID</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- Injected via JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="admin-section">
+            <h3>Gestor de FAQ</h3>
+            <button class="btn btn-sm btn-outline mb-1" id="addFaqBtn">+ Añadir Pregunta</button>
+            <div id="faqManagerList" class="faq-manager-list">
+              <!-- Injected via JS -->
+            </div>
+          </div>
+        </div>
+      </div>
+      </main>
+    </div>
+  </div>
+  </div>
+
   <footer class="footer">
     <p>Powered by Google Translate · Traducción gratuita</p>
   </footer>
@@ -180,6 +546,28 @@
       document.body.appendChild(s);
     })();
   </script>
+  <!-- FAQ Editor Modal -->
+  <div class="modal-overlay hidden" id="faqModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="faqModalTitle">Editar Pregunta</h3>
+        <button id="closeFaqModal" class="btn-icon">&times;</button>
+      </div>
+      <div class="modal-body mt-2">
+        <div class="form-group">
+          <label>Pregunta</label>
+          <input type="text" id="faqQuestionInput" class="form-input" placeholder="¿Cómo funciona...?">
+        </div>
+        <div class="form-group mt-1">
+          <label>Respuesta</label>
+          <textarea id="faqAnswerInput" class="form-input" rows="4" placeholder="La respuesta es..."></textarea>
+        </div>
+        <button class="btn btn-primary btn-full mt-2" id="saveFaqBtn">Guardar cambios</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
 </body>
 
 </html>
