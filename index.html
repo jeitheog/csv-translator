@@ -111,6 +111,27 @@
       </div>
 
       <div class="config-row">
+        <label class="config-label">🚀 Motor de Traducción</label>
+        <select id="translationEngine" class="select">
+          <option value="google" selected>Google Translate (Básico / Gratis)</option>
+          <option value="claude">Claude 3.5 Sonnet (Premium / Alta Calidad)</option>
+        </select>
+        <p class="config-hint" id="engineHint">Google es rápido pero Claude es mucho mejor con el código HTML y el
+          sentido de las descripciones.</p>
+      </div>
+
+      <div id="claudeConfig" class="config-row hidden"
+        style="background: rgba(161, 126, 255, 0.05); padding: 15px; border-radius: 12px; border: 1px dashed rgba(161, 126, 255, 0.3);">
+        <label class="config-label">🔑 Anthropic API Key</label>
+        <p class="config-hint" style="margin-bottom: 8px;">Necesaria para usar el motor Claude. Se guarda solo en tu
+          navegador.</p>
+        <input type="password" id="claudeKey" class="select" placeholder="sk-ant-api03-..."
+          style="width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);color:#fff;font-size:0.95rem;" />
+        <p class="config-hint" style="margin-top: 8px;">¿No tienes una? <a href="https://console.anthropic.com/"
+            target="_blank" style="color: #a17eff;">Consíguela aquí</a></p>
+      </div>
+
+      <div class="config-row">
         <label class="config-label">🏷️ Nombre del Vendedor (Shopify Vendor)</label>
         <p class="config-hint">Este nombre se aplicará a la columna "Vendor" en el archivo exportado</p>
         <input type="text" id="brandName" class="select" placeholder="Ej: Rovelli Maison" value="Rovelli Maison"
