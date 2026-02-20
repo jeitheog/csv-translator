@@ -868,12 +868,12 @@ async function translateHTML(html, langPair, retries) {
   }
 }
 
-// Translate plain text (no HTML) via Google Translate with MyMemory fallback
+// Translate plain text via server-side proxy (/api/translate) with browser fallbacks
 async function translatePlainText(text, langPair, retries = 3) {
   if (!text || text.trim() === '') return text;
   if (/^\d+([.,]\d+)?$/.test(text.trim())) return text;
 
-  // For very long texts (e.g. massive descriptions), chunk them to avoid URL length limits
+  // For very long texts, chunk them to avoid request size limits
   const MAX_CHUNK = 1000;
   if (text.length > MAX_CHUNK) {
     const chunks = [];
@@ -881,7 +881,6 @@ async function translatePlainText(text, langPair, retries = 3) {
       chunks.push(text.substring(i, i + MAX_CHUNK));
     }
     const results = await Promise.all(chunks.map(c => translatePlainText(c, langPair, retries)));
-    // If any chunk failed, signal failure for the whole text
     if (results.some(r => r === null)) return null;
     return results.join('');
   }
@@ -889,20 +888,36 @@ async function translatePlainText(text, langPair, retries = 3) {
   const [sl, tl] = langPair.split('|');
 
   for (let attempt = 0; attempt < retries; attempt++) {
+    // Primary: server-side proxy (no CORS issues, no browser restrictions)
     try {
-      // Primary: Google Translate (fast, no key needed)
-      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&q=${encodeURIComponent(text)}`;
-      const res = await fetch(url);
-
+      const res = await fetch('/api/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, sl, tl }),
+      });
       if (res.status === 429) {
         const wait = Math.pow(2, attempt) * 1000;
-        console.warn(`Google rate limited. Waiting ${wait}ms...`);
         await sleep(wait);
         continue;
       }
+      if (res.ok) {
+        const data = await res.json();
+        if (data.translated) return data.translated;
+      }
+    } catch (err) {
+      console.warn(`Server translate attempt ${attempt + 1} failed:`, err);
+    }
 
+    // Fallback 1: direct Google Translate from browser
+    try {
+      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&q=${encodeURIComponent(text)}`;
+      const res = await fetch(url);
+      if (res.status === 429) {
+        const wait = Math.pow(2, attempt) * 1000;
+        await sleep(wait);
+        continue;
+      }
       const data = await res.json();
-      // Google returns [[['translated','original',...]], ...]
       if (data && data[0]) {
         const translated = data[0].map(seg => seg[0]).join('');
         if (translated) return translated;
@@ -912,7 +927,7 @@ async function translatePlainText(text, langPair, retries = 3) {
       logError(`Google Translate (${sl}|${tl})`, err.message || 'Error de red');
     }
 
-    // Fallback: MyMemory API
+    // Fallback 2: MyMemory API
     try {
       const url2 = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langPair}`;
       const res2 = await fetch(url2);
