@@ -863,23 +863,40 @@ async function translateHTML(html, langPair, retries) {
   if (textSegments.length === 0) return html;
 
   // Batch translate segments using a unique delimiter
-  // We use " ||| " because Google Translate tends to preserve it
-  const delimiter = " ||| ";
+  // We use characters that Google Translate usually preserves
+  const delimiter = " [[[###]]] ";
   const fullText = textSegments.join(delimiter);
   const translatedBody = await translatePlainText(fullText, langPair, retries);
 
   // If translation failed entirely, return null to signal failure
   if (translatedBody === null) return null;
 
-  const translatedSegments = translatedBody.split(delimiter).map(s => s.trim());
+  // Split with regex to be flexible with spaces (Google might add/remove spaces around symbols)
+  const translatedSegments = translatedBody.split(/\s*\[\[\[###\]\]\]\s*/).map(s => s.trim());
 
-  // Reconstruct the HTML
-  textIndices.forEach((partIdx, i) => {
-    // If splitting failed (e.g. Google merged segments), we fallback to the original if bounds exceeded
-    parts[partIdx] = translatedSegments[i] || textSegments[i];
-  });
+  // VERIFICATION: Did we get the same number of segments back?
+  if (translatedSegments.length === textSegments.length) {
+    textIndices.forEach((partIdx, i) => {
+      parts[partIdx] = translatedSegments[i];
+    });
+    return parts.join('');
+  } else {
+    // FALLBACK: If batching failed (mangled delimiters), translate segments one by one
+    console.warn(`HTML Batch mismatch (${translatedSegments.length} vs ${textSegments.length}). Falling back to individual segments.`);
 
-  return parts.join('');
+    // We do this in parallel but with a slight delay between to avoid rate limiting
+    const results = [];
+    for (const seg of textSegments) {
+      const trans = await translatePlainText(seg, langPair, retries);
+      results.push(trans || seg); // fallback to original if individual fails
+      await sleep(100);
+    }
+
+    textIndices.forEach((partIdx, i) => {
+      parts[partIdx] = results[i];
+    });
+    return parts.join('');
+  }
 }
 
 // Translate plain text (no HTML) via Google Translate with MyMemory fallback
@@ -888,7 +905,7 @@ async function translatePlainText(text, langPair, retries = 3) {
   if (/^\d+([.,]\d+)?$/.test(text.trim())) return text;
 
   // For very long texts (e.g. massive descriptions), chunk them to avoid URL length limits
-  const MAX_CHUNK = 2000;
+  const MAX_CHUNK = 1000;
   if (text.length > MAX_CHUNK) {
     const chunks = [];
     for (let i = 0; i < text.length; i += MAX_CHUNK) {
