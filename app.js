@@ -637,21 +637,8 @@ async function startTranslation() {
     return;
   }
 
-  // ── Limit to 100 products per batch ──
-  const MAX_PRODUCTS = 100;
-  const totalRows = state.rows.length;
-  const rowsToProcess = state.rows.slice(0, MAX_PRODUCTS);
-  const skippedRows = totalRows > MAX_PRODUCTS ? totalRows - MAX_PRODUCTS : 0;
-
-  if (skippedRows > 0) {
-    const proceed = confirm(
-      `⚠️ Tu archivo tiene ${totalRows} productos.\n\n` +
-      `Para garantizar la calidad de las traducciones, se procesarán los primeros ${MAX_PRODUCTS} productos.\n\n` +
-      `Los ${skippedRows} productos restantes se podrán traducir en otra ronda.\n\n` +
-      `¿Continuar?`
-    );
-    if (!proceed) return;
-  }
+  const rowsToProcess = state.rows;
+  const skippedRows = 0;
 
   stepConfigure.classList.add('hidden');
   stepProgress.classList.remove('hidden');
