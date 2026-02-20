@@ -676,6 +676,8 @@ async function startTranslation() {
   const lang = sourceLang.value;
   const langPair = lang === 'auto' ? 'auto|es' : `${lang}|es`;
 
+  console.log(`🚀 Iniciando traducción con par: ${langPair}`);
+
   // Collect all texts to translate (only first MAX_PRODUCTS rows)
   const textsToTranslate = [];
   const cellMap = []; // { rowIdx, colIdx, textIdx }
