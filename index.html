@@ -155,6 +155,25 @@
         <div class="progress-bar-fill" id="progressFill"></div>
       </div>
       <p class="muted center" id="progressDetail">Esto puede tardar unos minutos dependiendo del tamaño del archivo.</p>
+
+      <!-- Real-time Verification Panel -->
+      <div id="verificationPanel" class="hidden"
+        style="margin-top:1.2rem;padding:1rem 1.5rem;border-radius:12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);">
+        <p style="margin:0 0 0.6rem;font-weight:600;font-size:0.95rem;color:#c4b5fd;">🔍 Verificación en tiempo real</p>
+        <div style="display:flex;gap:1.5rem;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:0.4rem;">
+            <span style="color:#4ade80;font-size:1.1rem;">✅</span>
+            <span style="font-size:0.9rem;color:#aaa;">Exitosas:</span>
+            <strong id="verifySuccess" style="color:#4ade80;">0</strong>
+          </div>
+          <div style="display:flex;align-items:center;gap:0.4rem;">
+            <span style="color:#ff4d4d;font-size:1.1rem;">⚠️</span>
+            <span style="font-size:0.9rem;color:#aaa;">Fallidas:</span>
+            <strong id="verifyFailed" style="color:#4ade80;">0</strong>
+          </div>
+        </div>
+        <p id="verifyRetrying" style="margin:0.5rem 0 0;font-size:0.85rem;color:#fbbf24;"></p>
+      </div>
     </section>
 
     <!-- STEP 4: Result -->

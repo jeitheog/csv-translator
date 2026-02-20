@@ -645,17 +645,42 @@ async function startTranslation() {
     return;
   }
 
+  // ── Limit to 100 products per batch ──
+  const MAX_PRODUCTS = 100;
+  const totalRows = state.rows.length;
+  const rowsToProcess = state.rows.slice(0, MAX_PRODUCTS);
+  const skippedRows = totalRows > MAX_PRODUCTS ? totalRows - MAX_PRODUCTS : 0;
+
+  if (skippedRows > 0) {
+    const proceed = confirm(
+      `⚠️ Tu archivo tiene ${totalRows} productos.\n\n` +
+      `Para garantizar la calidad de las traducciones, se procesarán los primeros ${MAX_PRODUCTS} productos.\n\n` +
+      `Los ${skippedRows} productos restantes se podrán traducir en otra ronda.\n\n` +
+      `¿Continuar?`
+    );
+    if (!proceed) return;
+  }
+
   stepConfigure.classList.add('hidden');
   stepProgress.classList.remove('hidden');
+
+  // Show/reset verification panel
+  const verifyPanel = $('verificationPanel');
+  if (verifyPanel) {
+    verifyPanel.classList.remove('hidden');
+    $('verifySuccess').textContent = '0';
+    $('verifyFailed').textContent = '0';
+    $('verifyRetrying').textContent = '';
+  }
 
   const lang = sourceLang.value;
   const langPair = lang === 'auto' ? 'auto|es' : `${lang}|es`;
 
-  // Collect all unique texts to translate
+  // Collect all texts to translate (only first MAX_PRODUCTS rows)
   const textsToTranslate = [];
   const cellMap = []; // { rowIdx, colIdx, textIdx }
 
-  state.rows.forEach((row, rowIdx) => {
+  rowsToProcess.forEach((row, rowIdx) => {
     state.headers.forEach((_, colIdx) => {
       if (state.selectedCols.has(colIdx)) {
         const text = (row[colIdx] || '').trim();
@@ -667,25 +692,36 @@ async function startTranslation() {
     });
   });
 
-  // Deep clone rows
+  // Deep clone ALL rows (untouched rows beyond MAX_PRODUCTS keep original values)
   state.translatedRows = state.rows.map(r => [...r]);
 
   const total = textsToTranslate.length;
   let done = 0;
+  let successCount = 0;
+  let failedCells = []; // { idx, rowIdx, colIdx, originalText }
 
-  updateProgress(0, total, 'Iniciando traducción...');
+  updateProgress(0, total, 'Iniciando traducción...', 0, 0);
 
-  // Google Translate is fast — can handle larger batches with shorter delays
   const BATCH_SIZE = 5;
-  const DELAY_MS = 200;
+  const DELAY_MS = 250;
 
   // Find the Title column index for enhancement
   const titleIdx = state.headers.indexOf('Title');
   const handleIdx = state.headers.indexOf('Handle') >= 0
     ? state.headers.indexOf('Handle')
     : state.headers.indexOf('URL handle');
-  const enhancedTitles = {}; // handle → enhanced title (so variants share the same title)
+  const enhancedTitles = {};
 
+  // Helper: check if text is "untranslatable" (number, URL, code, etc.)
+  function isSkippable(text) {
+    if (!text || text.trim() === '') return true;
+    if (/^\d+([.,]\d+)?$/.test(text.trim())) return true;
+    if (/^https?:\/\//i.test(text.trim())) return true;
+    if (/^[A-Z0-9_-]+$/i.test(text.trim()) && text.trim().length < 30) return true; // SKUs, codes
+    return false;
+  }
+
+  // ── Main translation pass ──
   for (let i = 0; i < textsToTranslate.length; i += BATCH_SIZE) {
     const batch = textsToTranslate.slice(i, i + BATCH_SIZE);
     const batchCells = cellMap.slice(i, i + BATCH_SIZE);
@@ -696,31 +732,99 @@ async function startTranslation() {
 
     translations.forEach((translated, j) => {
       const { rowIdx, colIdx } = batchCells[j];
+      const originalText = batch[j];
 
-      // If this is a Title column, enhance it creatively
-      if (colIdx === titleIdx && translated) {
-        const handle = handleIdx >= 0 ? state.rows[rowIdx][handleIdx] : rowIdx;
-        if (!enhancedTitles[handle]) {
-          enhancedTitles[handle] = enhanceTitle(translated);
+      // Verify: did translation actually change the text?
+      const didTranslate = translated !== null && translated !== originalText;
+      const skippable = isSkippable(originalText);
+
+      if (translated === null) {
+        // Explicit failure — keep original, mark for retry
+        state.translatedRows[rowIdx][colIdx] = originalText;
+        failedCells.push({ idx: i + j, rowIdx, colIdx, originalText });
+      } else if (!didTranslate && !skippable && originalText.length > 3) {
+        // Returned same text but it's not a code/number — suspect failure
+        state.translatedRows[rowIdx][colIdx] = originalText;
+        failedCells.push({ idx: i + j, rowIdx, colIdx, originalText });
+      } else {
+        // Success path — apply title enhancement if needed
+        if (colIdx === titleIdx && translated) {
+          const handle = handleIdx >= 0 ? state.rows[rowIdx][handleIdx] : rowIdx;
+          if (!enhancedTitles[handle]) {
+            enhancedTitles[handle] = enhanceTitle(translated);
+          }
+          translated = enhancedTitles[handle];
         }
-        translated = enhancedTitles[handle];
+        state.translatedRows[rowIdx][colIdx] = translated;
+        successCount++;
       }
-
-      state.translatedRows[rowIdx][colIdx] = translated;
       done++;
     });
 
-    updateProgress(done, total, `Traduciendo celda ${done} de ${total}...`);
+    updateProgress(done, total, `Traduciendo celda ${done} de ${total}...`, successCount, failedCells.length);
 
     if (i + BATCH_SIZE < textsToTranslate.length) {
       await sleep(DELAY_MS);
     }
   }
 
-  // Increment Usage Stats for the user
-  incrementUsage(state.rows.length);
+  // ── Retry pass for failed cells ──
+  if (failedCells.length > 0) {
+    if (verifyPanel) $('verifyRetrying').textContent = `🔄 Reintentando ${failedCells.length} celdas...`;
+    updateProgress(done, total, `🔄 Reintentando ${failedCells.length} celdas fallidas...`, successCount, failedCells.length);
 
-  showResult(total);
+    await sleep(2000); // long pause before retry
+
+    const retryResults = [];
+    for (let k = 0; k < failedCells.length; k++) {
+      const cell = failedCells[k];
+      const retried = await translateText(cell.originalText, langPair);
+
+      const didWork = retried !== null && retried !== cell.originalText;
+      if (didWork) {
+        let finalText = retried;
+        // Apply title enhancement on retry too
+        if (cell.colIdx === titleIdx && finalText) {
+          const handle = handleIdx >= 0 ? state.rows[cell.rowIdx][handleIdx] : cell.rowIdx;
+          if (!enhancedTitles[handle]) {
+            enhancedTitles[handle] = enhanceTitle(finalText);
+          }
+          finalText = enhancedTitles[handle];
+        }
+        state.translatedRows[cell.rowIdx][cell.colIdx] = finalText;
+        successCount++;
+        retryResults.push(true);
+      } else {
+        retryResults.push(false);
+      }
+
+      updateProgress(done, total,
+        `🔄 Reintento ${k + 1} de ${failedCells.length}...`,
+        successCount, failedCells.length - retryResults.filter(r => r).length
+      );
+
+      await sleep(800); // slower retry pace
+    }
+
+    // Update failed count after retries
+    const stillFailed = retryResults.filter(r => !r).length;
+    failedCells = failedCells.filter((_, i) => !retryResults[i]);
+
+    if (verifyPanel) {
+      $('verifyRetrying').textContent = stillFailed > 0
+        ? `⚠️ ${stillFailed} celdas no pudieron ser traducidas`
+        : '✅ ¡Todos los reintentos exitosos!';
+    }
+  }
+
+  // Final verification update
+  const finalFailed = failedCells.length;
+  updateProgress(total, total, '¡Traducción completada!', successCount, finalFailed);
+
+  // Increment Usage Stats
+  incrementUsage(rowsToProcess.length);
+
+  showResult(total, successCount, finalFailed, skippedRows);
 }
 
 async function translateText(text, langPair, retries = 3) {
@@ -729,12 +833,16 @@ async function translateText(text, langPair, retries = 3) {
   // Skip purely numeric values
   if (/^\d+([.,]\d+)?$/.test(text.trim())) return text;
 
+  // Skip URLs
+  if (/^https?:\/\//i.test(text.trim())) return text;
+
   // If text contains HTML tags, translate only the text parts
   if (/<[^>]+>/.test(text)) {
     return translateHTML(text, langPair, retries);
   }
 
-  return translatePlainText(text, langPair, retries);
+  const result = await translatePlainText(text, langPair, retries);
+  return result; // null = failure, string = success
 }
 
 // Translate HTML content: preserve tags, translate only text between them
@@ -760,6 +868,9 @@ async function translateHTML(html, langPair, retries) {
   const fullText = textSegments.join(delimiter);
   const translatedBody = await translatePlainText(fullText, langPair, retries);
 
+  // If translation failed entirely, return null to signal failure
+  if (translatedBody === null) return null;
+
   const translatedSegments = translatedBody.split(delimiter).map(s => s.trim());
 
   // Reconstruct the HTML
@@ -784,6 +895,8 @@ async function translatePlainText(text, langPair, retries = 3) {
       chunks.push(text.substring(i, i + MAX_CHUNK));
     }
     const results = await Promise.all(chunks.map(c => translatePlainText(c, langPair, retries)));
+    // If any chunk failed, signal failure for the whole text
+    if (results.some(r => r === null)) return null;
     return results.join('');
   }
 
@@ -830,15 +943,25 @@ async function translatePlainText(text, langPair, retries = 3) {
 
     if (attempt < retries - 1) await sleep(1000);
   }
-  return text; // all retries exhausted, keep original
+  return null; // all retries exhausted, signal failure
 }
 
-function updateProgress(done, total, message) {
+function updateProgress(done, total, message, successCount, failedCount) {
   const pct = total === 0 ? 100 : Math.round((done / total) * 100);
   progressFill.style.width = pct + '%';
   progressPct.textContent = pct + '%';
   progressText.textContent = message;
   progressDetail.textContent = `${done} de ${total} celdas traducidas`;
+
+  // Update verification panel
+  const verifyPanel = $('verificationPanel');
+  if (verifyPanel && successCount !== undefined) {
+    $('verifySuccess').textContent = successCount;
+    $('verifyFailed').textContent = failedCount || 0;
+    // Color the failed count red if > 0
+    const failedEl = $('verifyFailed');
+    if (failedEl) failedEl.style.color = failedCount > 0 ? '#ff4d4d' : '#4ade80';
+  }
 }
 
 function sleep(ms) {
@@ -846,17 +969,27 @@ function sleep(ms) {
 }
 
 // ── Result ─────────────────────────────────────────────────
-function showResult(totalCells) {
+function showResult(totalCells, successCount, failedCount, skippedRows) {
   stepProgress.classList.add('hidden');
   stepResult.classList.remove('hidden');
 
-  // Stats
-  resultStats.innerHTML = `
-    <div class="stat-chip">📊 <strong>${state.rows.length}</strong> filas</div>
+  // Stats with verification info
+  let statsHTML = `
+    <div class="stat-chip">📊 <strong>${state.rows.length}</strong> filas totales</div>
     <div class="stat-chip">📋 <strong>${state.headers.length}</strong> columnas</div>
-    <div class="stat-chip">✅ <strong>${totalCells}</strong> celdas traducidas</div>
+    <div class="stat-chip">✅ <strong>${successCount || totalCells}</strong> celdas traducidas</div>
     <div class="stat-chip">🌐 Idioma destino: <strong>Español</strong></div>
   `;
+
+  if (failedCount > 0) {
+    statsHTML += `<div class="stat-chip" style="background:rgba(255,77,77,0.15);border-color:#ff4d4d;">⚠️ <strong>${failedCount}</strong> celdas sin traducir</div>`;
+  }
+
+  if (skippedRows > 0) {
+    statsHTML += `<div class="stat-chip" style="background:rgba(255,165,0,0.15);border-color:#ffa500;">⏭️ <strong>${skippedRows}</strong> productos pendientes (lote siguiente)</div>`;
+  }
+
+  resultStats.innerHTML = statsHTML;
 
   buildResultTable(resultTable, state.translatedRows, false);
   buildResultTable(comparisonTable, state.translatedRows, true);
