@@ -1059,45 +1059,7 @@ const ADMIN_CREDENTIALS = {
   password: 'qZ2B8cn8'
 };
 
-loginForm.addEventListener('submit', (e) => {
-  e.preventDefault();
-  const email = $('loginEmail').value.trim();
-  const pass = $('loginPassword').value;
 
-  if (email === ADMIN_CREDENTIALS.email && pass === ADMIN_CREDENTIALS.password) {
-    state.user = {
-      email: email,
-      name: 'Super Admin',
-      plan: 'unlimited',
-      role: 'admin',
-      usage: 0,
-      filesProcessed: 0,
-      billingHistory: [],
-      regDate: new Date().toLocaleDateString(),
-      status: 'active'
-    };
-  } else {
-    // Normal user logic (Mock)
-    state.user = {
-      email: email,
-      plan: 'free',
-      role: 'user',
-      usage: 0,
-      filesProcessed: 0
-    };
-  }
-
-  localStorage.setItem('csv_translator_user', JSON.stringify(state.user));
-  loginModal.classList.add('hidden');
-  updateAuthUI();
-
-  // Also add to allUsers for admin management view
-  const allUsers = JSON.parse(localStorage.getItem('allUsers') || '[]');
-  if (!allUsers.find(u => u.email === email)) {
-    allUsers.push(state.user);
-    localStorage.setItem('allUsers', JSON.stringify(allUsers));
-  }
-});
 
 // Restore Dashboard Handlers
 miCuentaBtn.onclick = () => {
@@ -1280,7 +1242,7 @@ function updateAuthModalUI() {
 
 authForm.onsubmit = (e) => {
   e.preventDefault();
-  const email = authEmail.value;
+  const email = authEmail.value.trim();
   const password = authPassword.value;
 
   if (password.length < 6) {
@@ -1289,20 +1251,40 @@ authForm.onsubmit = (e) => {
     return;
   }
 
-  // Mock Success
-  const existingUser = JSON.parse(localStorage.getItem('csv_translator_user'));
-  const plan = currentAuthTab === 'login' ? (existingUser?.plan || 'free') : 'free';
-  const role = email === 'admin@example.com' ? 'admin' : 'user';
+  // Super-Admin check
+  if (email === ADMIN_CREDENTIALS.email && password === ADMIN_CREDENTIALS.password) {
+    state.user = {
+      email: email,
+      name: 'Super Admin',
+      plan: 'unlimited',
+      role: 'admin',
+      usage: 0,
+      filesProcessed: 0,
+      billingHistory: [],
+      regDate: new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }),
+      status: 'active'
+    };
+  } else {
+    // Normal user logic (Mock)
+    const existingUser = JSON.parse(localStorage.getItem('csv_translator_user'));
+    const plan = currentAuthTab === 'login' ? (existingUser?.plan || 'free') : 'free';
+    state.user = {
+      email,
+      plan,
+      role: 'user',
+      usage: existingUser?.usage || 0,
+      filesProcessed: existingUser?.filesProcessed || 0,
+      billingHistory: existingUser?.billingHistory || [],
+      regDate: existingUser?.regDate || new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })
+    };
+  }
 
-  state.user = {
-    email,
-    plan,
-    role,
-    usage: existingUser?.usage || 0,
-    filesProcessed: existingUser?.filesProcessed || 0,
-    billingHistory: existingUser?.billingHistory || [],
-    regDate: existingUser?.regDate || new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })
-  };
+  // Add to allUsers for admin management view
+  const allUsers = JSON.parse(localStorage.getItem('allUsers') || '[]');
+  if (!allUsers.find(u => u.email === email)) {
+    allUsers.push(state.user);
+    localStorage.setItem('allUsers', JSON.stringify(allUsers));
+  }
 
   saveUserState();
   updateAuthUI();
