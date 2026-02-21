@@ -102,6 +102,10 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_shopify_test()
         elif self.path == "/api/shopify/products":
             self._handle_shopify_create_product()
+        elif self.path == "/api/translate":
+            self._handle_translate()
+        elif self.path == "/api/scraper":
+            self._handle_scraper()
         else:
             self.send_error(404, "Endpoint no encontrado")
 
@@ -301,6 +305,86 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
                 "success": False,
                 "error": error_msg
             })
+
+    # ─── Translate proxy ────────────────────────────────────
+    def _handle_translate(self):
+        import urllib.parse as _urlparse
+        length = int(self.headers.get("Content-Length", 0))
+        body = json.loads(self.rfile.read(length)) if length else {}
+        text = body.get("text", "").strip()
+        sl = body.get("sl", "auto").strip() or "auto"
+        tl = body.get("tl", "").strip()
+        if not text or not tl:
+            self._send_json_response(400, {"error": "Faltan campos: text, tl"})
+            return
+        # Try Google Translate
+        try:
+            url = (
+                "https://translate.googleapis.com/translate_a/single"
+                f"?client=gtx&sl={_urlparse.quote(sl)}&tl={_urlparse.quote(tl)}"
+                f"&dt=t&q={_urlparse.quote(text)}"
+            )
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+            if data and data[0]:
+                translated = "".join(seg[0] for seg in data[0] if seg and seg[0])
+                if translated:
+                    self._send_json_response(200, {"translated": translated, "source": "google"})
+                    return
+        except Exception:
+            pass
+        # Fallback: MyMemory
+        try:
+            url2 = f"https://api.mymemory.translated.net/get?q={_urlparse.quote(text)}&langpair={_urlparse.quote(sl + '|' + tl)}"
+            with urllib.request.urlopen(url2, timeout=10) as resp:
+                data2 = json.loads(resp.read().decode())
+            if data2.get("responseStatus") == 200:
+                t = data2.get("responseData", {}).get("translatedText", "")
+                if t:
+                    self._send_json_response(200, {"translated": t, "source": "mymemory"})
+                    return
+        except Exception:
+            pass
+        self._send_json_response(502, {"error": "No se pudo traducir"})
+
+    # ─── Shopify scraper ─────────────────────────────────────
+    def _handle_scraper(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = json.loads(self.rfile.read(length)) if length else {}
+        raw_url = body.get("url", "").strip()
+        if not raw_url:
+            self._send_json_response(400, {"error": "Falta la URL de la tienda"})
+            return
+        store_url = raw_url.rstrip("/")
+        if not store_url.startswith("http"):
+            store_url = "https://" + store_url
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json",
+        }
+        all_products = []
+        page = 1
+        try:
+            while True:
+                url = f"{store_url}/products.json?limit=250&page={page}"
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    data = json.loads(resp.read().decode())
+                products = data.get("products", [])
+                if not products:
+                    break
+                all_products.extend(products)
+                if len(products) < 250 or page >= 20:
+                    break
+                page += 1
+        except urllib.error.HTTPError as e:
+            self._send_json_response(e.code, {"error": f"La tienda devolvió error {e.code}"})
+            return
+        except Exception as e:
+            self._send_json_response(502, {"error": f"No se pudo conectar: {str(e)}"})
+            return
+        self._send_json_response(200, {"products": all_products, "total": len(all_products)})
 
     # ─── Suppress default logging clutter ───────────────────
     def log_message(self, format, *args):

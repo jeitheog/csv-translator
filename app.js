@@ -205,7 +205,8 @@ importFromUrlBtn.addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
     });
-    const data = await res.json();
+    let data;
+    try { data = await res.json(); } catch { throw new Error(`Error del servidor (${res.status}). Verifica que la URL sea una tienda Shopify válida.`); }
     if (!res.ok) throw new Error(data.error || 'Error desconocido');
 
     if (!data.products || data.products.length === 0) {
