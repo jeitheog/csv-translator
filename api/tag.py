@@ -45,7 +45,7 @@ def _call_gemini(title, description, vendor):
 
     body = json.dumps({
         'contents': [{'parts': [{'text': prompt}]}],
-        'generationConfig': {'maxOutputTokens': 80, 'temperature': 0.2},
+        'generationConfig': {'maxOutputTokens': 150, 'temperature': 0.2},
     }).encode()
 
     req = urllib.request.Request(
@@ -62,8 +62,13 @@ def _call_gemini(title, description, vendor):
     raw = re.sub(r'^```[a-z]*\n?', '', raw).rstrip('`').strip()
 
     parsed = json.loads(raw)
-    tag   = str(parsed.get('tag', '')).strip('.,;:!?\'" ')[:60]
     title_out = str(parsed.get('title', '')).strip('.,;:!?\'" ')[:120]
+    tag = str(parsed.get('tag', '')).strip('.,;:!?\'" ')[:60]
+
+    # Guarantee: tag always matches the product name part of the title
+    if title_out and ' - ' in title_out:
+        tag = title_out.split(' - ')[0].strip()
+
     return tag, title_out
 
 

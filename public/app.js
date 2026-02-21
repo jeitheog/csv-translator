@@ -1492,10 +1492,20 @@ function formatBytes(bytes) {
         });
         if (tagRes.ok) {
           const { tag, title: aiTitle } = await tagRes.json();
-          if (tag) payload.tags = tag;
           if (aiTitle) payload.title = aiTitle;
+          // Tag = product name: take from AI, or extract from title before ' - '
+          if (tag) {
+            payload.tags = tag;
+          } else if (aiTitle && aiTitle.includes(' - ')) {
+            payload.tags = aiTitle.split(' - ')[0].trim();
+          }
         }
       } catch (_) { /* ignore AI errors, continue with import */ }
+
+      // Final fallback: if still no tag but title has ' - ', extract it
+      if (!payload.tags && payload.title && payload.title.includes(' - ')) {
+        payload.tags = payload.title.split(' - ')[0].trim();
+      }
 
       const logItem = addLogItem(`⏳ (${i + 1}/${products.length}) ${orig.title}...`);
 
