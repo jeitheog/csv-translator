@@ -11,7 +11,6 @@ const state = {
   translatedRows: [],
   fileName: '',
   isShopify: false,
-  user: null,      // { email, plan, usage, billingHistory: [], filesProcessed: 0 }
 };
 
 // ── Shopify Template Detection ─────────────────────────────
@@ -116,84 +115,20 @@ const resultStats = $('resultStats');
 const resultTable = $('resultTable');
 const comparisonTable = $('comparisonTable');
 
-// ── Auth Refs ─────────────────────────────────────────────
-const loginBtn = $('loginBtn');
-const logoutBtn = $('logoutBtn');
-const userProfile = $('userProfile');
-const userEmailDisplay = $('userEmailDisplay');
-const authModal = $('authModal');
-const closeAuthModal = $('closeAuthModal');
-const authForm = $('authForm');
-const authEmail = $('authEmail');
-const authPassword = $('authPassword');
-const authSubmitBtn = $('authSubmitBtn');
-const authError = $('authError');
-const authTabs = document.querySelectorAll('.auth-tab');
-const authWarning = $('authWarning');
-const authWarningLink = $('authWarningLink');
-const authWarningTitle = $('authWarningTitle');
-const authWarningText = $('authWarningText');
-
-const userPlanBadge = $('userPlanBadge');
-const upgradeBtns = document.querySelectorAll('.upgrade-btn');
-
-
-// ── Dashboard & Payment Refs ────────────────────────────────
-const miCuentaBtn = $('miCuentaBtn');
-const dashboardModal = $('dashboardModal');
-const closeDashboardModal = $('closeDashboardModal');
-const dashEmail = $('dashEmail');
-const dashPlan = $('dashPlan');
-const dashNavItems = document.querySelectorAll('.nav-item');
-const dashViews = document.querySelectorAll('.dash-view');
-const usageCount = $('usageCount');
-const usageBarFill = $('usageBarFill');
-const dashFilesCount = $('dashFilesCount');
-
-const paymentModal = $('paymentModal');
-const closePaymentModal = $('closePaymentModal');
-const paymentForm = $('paymentForm');
-const cardNumber = $('cardNumber');
-const cardExpiry = $('cardExpiry');
-const cardCvc = $('cardCvc');
-const paymentError = $('paymentError');
-const paymentBtnText = $('paymentBtnText');
-const paymentSpinner = $('paymentSpinner');
-
-const cancelSubBtn = $('cancelSubBtn');
-const dashUpgradeBtn = $('dashUpgradeBtn');
-const dashUpgradeContainer = $('dashUpgradeContainer');
-const navAdmin = $('navAdmin');
-
-// Admin Refs
-const adminMRR = $('adminMRR');
-const adminUserRatios = $('adminUserRatios');
-const abuseAlerts = $('abuseAlerts');
-const adminUserTable = $('adminUserTable');
-const adminFailedPayments = $('adminFailedPayments');
-const adminLogsTable = $('adminLogsTable');
-const logFilter = $('logFilter');
-const addFaqBtn = $('addFaqBtn');
-const faqManagerList = $('faqManagerList');
-
-// FAQ Modal Refs
-const faqModal = $('faqModal');
-const closeFaqModal = $('closeFaqModal');
-const faqModalTitle = $('faqModalTitle');
-const faqQuestionInput = $('faqQuestionInput');
-const faqAnswerInput = $('faqAnswerInput');
-const saveFaqBtn = $('saveFaqBtn');
-
-let pendingPlanUpgrade = null;
-let currentDashView = 'stats';
-
-// ── Subscription Refs ──────────────────────────────────────
-const pricingModal = $('pricingModal');
-const closePricingModal = $('closePricingModal');
-
-let currentAuthTab = 'login';
 const downloadBtn = $('downloadBtn');
 const startOverBtn = $('startOverBtn');
+
+// ── Shopify Scraper refs ────────────────────────────────────
+const shopifyImportUrl = $('shopifyImportUrl');
+const importFromUrlBtn = $('importFromUrlBtn');
+const importStatus = $('importStatus');
+const stepSelect = $('step-select');
+const productsGrid = $('productsGrid');
+const continueWithSelected = $('continueWithSelected');
+const selectProductCountEl = $('selectProductCount');
+const selectAllProductsBtn = $('selectAllProducts');
+const deselectAllProductsBtn = $('deselectAllProducts');
+const backToUploadBtn = $('backToUpload');
 
 // ── File Upload ────────────────────────────────────────────
 browseBtn.addEventListener('click', () => fileInput.click());
@@ -241,14 +176,188 @@ function resetUpload() {
   fileInfo.classList.add('hidden');
   dropZone.classList.remove('hidden');
   fileInput.value = '';
+  stepSelect.classList.add('hidden');
   stepConfigure.classList.add('hidden');
   stepProgress.classList.add('hidden');
   stepResult.classList.add('hidden');
+  importStatus.classList.add('hidden');
+  importFromUrlBtn.disabled = false;
   state.rawText = '';
   state.headers = [];
   state.rows = [];
   state.selectedCols.clear();
   state.translatedRows = [];
+  state.scrapedProducts = [];
+}
+
+// ── Shopify URL Importer ────────────────────────────────────
+importFromUrlBtn.addEventListener('click', async () => {
+  const url = shopifyImportUrl.value.trim();
+  if (!url) return;
+
+  importFromUrlBtn.disabled = true;
+  importStatus.textContent = '⏳ Conectando con la tienda...';
+  importStatus.classList.remove('hidden');
+
+  try {
+    const res = await fetch('/api/scraper', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error desconocido');
+
+    if (!data.products || data.products.length === 0) {
+      importStatus.textContent = '⚠️ No se encontraron productos en esa tienda.';
+      importFromUrlBtn.disabled = false;
+      return;
+    }
+
+    importStatus.textContent = `✅ ${data.total} productos encontrados`;
+    state.scrapedProducts = data.products;
+    showProductSelect(data.products);
+  } catch (err) {
+    importStatus.textContent = `❌ ${err.message}`;
+    importFromUrlBtn.disabled = false;
+  }
+});
+
+function showProductSelect(products) {
+  stepUpload.classList.add('hidden');
+  stepSelect.classList.remove('hidden');
+  stepConfigure.classList.add('hidden');
+
+  productsGrid.innerHTML = '';
+  const selected = new Set(products.map((_, i) => i));
+
+  function updateCount() {
+    selectProductCountEl.textContent = `${selected.size} seleccionados`;
+    continueWithSelected.disabled = selected.size === 0;
+  }
+
+  products.forEach((p, i) => {
+    const img = (p.images && p.images[0]) ? p.images[0].src : '';
+    const price = p.variants && p.variants[0] ? `€${p.variants[0].price}` : '';
+    const card = document.createElement('div');
+    card.className = 'product-card selected';
+    card.dataset.index = i;
+    card.innerHTML = `
+      <input type="checkbox" checked />
+      ${img ? `<img src="${img}" alt="${p.title}" loading="lazy" />` : '<div style="width:100%;aspect-ratio:1;background:rgba(255,255,255,0.08);border-radius:8px;"></div>'}
+      <p class="product-title">${p.title}</p>
+      <p class="product-price">${price}</p>
+    `;
+    card.addEventListener('click', () => {
+      const cb = card.querySelector('input[type="checkbox"]');
+      if (selected.has(i)) {
+        selected.delete(i);
+        card.classList.remove('selected');
+        cb.checked = false;
+      } else {
+        selected.add(i);
+        card.classList.add('selected');
+        cb.checked = true;
+      }
+      updateCount();
+    });
+    productsGrid.appendChild(card);
+  });
+
+  updateCount();
+
+  selectAllProductsBtn.onclick = () => {
+    productsGrid.querySelectorAll('.product-card').forEach((c, i) => {
+      selected.add(i);
+      c.classList.add('selected');
+      c.querySelector('input').checked = true;
+    });
+    updateCount();
+  };
+
+  deselectAllProductsBtn.onclick = () => {
+    selected.clear();
+    productsGrid.querySelectorAll('.product-card').forEach(c => {
+      c.classList.remove('selected');
+      c.querySelector('input').checked = false;
+    });
+    updateCount();
+  };
+
+  backToUploadBtn.onclick = () => {
+    stepSelect.classList.add('hidden');
+    stepUpload.classList.remove('hidden');
+    importFromUrlBtn.disabled = false;
+  };
+
+  continueWithSelected.onclick = () => {
+    const selectedProducts = products.filter((_, i) => selected.has(i));
+    const csvText = productsToCSV(selectedProducts);
+    state.fileName = `${shopifyImportUrl.value.trim().replace(/https?:\/\//, '')}-productos.csv`;
+    parseCSV(csvText);
+    stepSelect.classList.add('hidden');
+    showConfigStep();
+  };
+}
+
+function productsToCSV(products) {
+  const headers = [
+    'Handle', 'Title', 'Body (HTML)', 'Vendor', 'Type', 'Tags', 'Published',
+    'Option1 Name', 'Option1 Value', 'Option2 Name', 'Option2 Value', 'Option3 Name', 'Option3 Value',
+    'Variant SKU', 'Variant Grams', 'Variant Inventory Tracker', 'Variant Inventory Qty',
+    'Variant Inventory Policy', 'Variant Fulfillment Service', 'Variant Price',
+    'Variant Compare At Price', 'Variant Requires Shipping', 'Variant Taxable', 'Variant Barcode',
+    'Image Src', 'Image Alt Text', 'Gift Card', 'SEO Title', 'SEO Description', 'Variant Weight Unit',
+  ];
+
+  const escapeCell = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+  const rows = [headers.map(escapeCell).join(',')];
+
+  for (const p of products) {
+    const variants = p.variants || [];
+    const options = p.options || [];
+    const tags = Array.isArray(p.tags) ? p.tags.join(', ') : (p.tags || '');
+
+    variants.forEach((v, i) => {
+      const isFirst = i === 0;
+      const img = p.images && p.images[i] ? p.images[i] : (p.images && p.images[0] ? p.images[0] : {});
+      rows.push([
+        p.handle,
+        isFirst ? p.title : '',
+        isFirst ? (p.body_html || '') : '',
+        isFirst ? (p.vendor || '') : '',
+        isFirst ? (p.product_type || '') : '',
+        isFirst ? tags : '',
+        isFirst ? (p.published_at ? 'true' : 'false') : '',
+        isFirst ? (options[0] ? options[0].name : '') : '',
+        v.option1 || '',
+        isFirst ? (options[1] ? options[1].name : '') : '',
+        v.option2 || '',
+        isFirst ? (options[2] ? options[2].name : '') : '',
+        v.option3 || '',
+        v.sku || '',
+        v.grams || '',
+        v.inventory_management || '',
+        v.inventory_quantity ?? '',
+        v.inventory_policy || '',
+        v.fulfillment_service || '',
+        v.price || '',
+        v.compare_at_price || '',
+        v.requires_shipping ?? '',
+        v.taxable ?? '',
+        v.barcode || '',
+        isFirst ? (img.src || '') : '',
+        isFirst ? (img.alt || '') : '',
+        'false',
+        isFirst ? (p.title || '') : '',
+        '',
+        v.weight_unit || 'kg',
+      ].map(escapeCell).join(','));
+    });
+  }
+
+  return rows.join('\n');
 }
 
 // ── CSV Parsing ────────────────────────────────────────────
@@ -364,8 +473,6 @@ function showConfigStep() {
   if (productEl) productEl.textContent = uniqueProducts;
   if (variantEl) variantEl.textContent = totalVariants;
 
-  // Check limits
-  checkUsageLimits(uniqueProducts);
 
   // Show or hide the Shopify info banner
   let banner = $('shopifyBanner');
@@ -416,7 +523,7 @@ function buildColumnsGrid() {
     chip.dataset.idx = idx;
 
     // In Shopify mode, lock non-translatable columns visually (unless they are cleared columns)
-    const locked = state.isShopify && !allTranslatable.has(header) && !shouldClearByDefault;
+    const locked = state.isShopify && !SHOPIFY_TRANSLATABLE_COLS.has(header) && !shouldClearByDefault;
     if (locked) chip.classList.add('locked');
 
     let recommendTag = '';
@@ -787,8 +894,6 @@ async function startTranslation() {
   const finalFailed = failedCells.length;
   updateProgress(total, total, '¡Traducción completada!', successCount, finalFailed);
 
-  // Increment Usage Stats
-  incrementUsage(rowsToProcess.length);
 
   showResult(total, successCount, finalFailed, skippedRows);
 }
@@ -915,11 +1020,10 @@ async function translatePlainText(text, langPair, retries = 3) {
       if (data2.responseStatus === 200 && data2.responseData?.translatedText) {
         return data2.responseData.translatedText;
       } else if (data2.responseStatus !== 200) {
-        logError('MyMemory API', data2.responseDetails || 'Error desconocido');
+        console.warn('MyMemory API error:', data2.responseDetails);
       }
     } catch (e) {
       console.warn('MyMemory fallback failed:', e);
-      logError('MyMemory Fallback', e.message || 'Error de conexión');
     }
 
     if (attempt < retries - 1) await sleep(1000);
@@ -1086,426 +1190,6 @@ function generateTags(row, titleIdx, typeIdx, opt1NameIdx, opt2NameIdx) {
   return '';
 }
 
-function updateAuthUI() {
-  if (state.user) {
-    loginBtn.classList.add('hidden');
-    userProfile.classList.remove('hidden');
-    userEmailDisplay.textContent = state.user.email;
-
-    // Update Plan Badge
-    const plan = state.user.plan;
-    userPlanBadge.textContent = plan === 'unlimited' ? 'Admin Ilimitado' : plan === 'pro' ? 'Plan Pro' : plan === 'business' ? 'Business' : 'Gratis';
-    userPlanBadge.className = 'plan-badge ' + (plan || 'free');
-  } else {
-    loginBtn.classList.remove('hidden');
-    userProfile.classList.add('hidden');
-    userEmailDisplay.textContent = '';
-  }
-
-  // Re-check limits for current state if we are in config step
-  if (!stepConfigure.classList.contains('hidden')) {
-    showConfigStep();
-  }
-}
-
-function checkUsageLimits(uniqueProducts) {
-  const plan = state.user?.plan || 'free';
-  const role = state.user?.role || '';
-  if (plan === 'unlimited' || role === 'admin') {
-    translateBtn.disabled = false;
-    authWarning.classList.add('hidden');
-    return;
-  }
-  const limits = { free: 10, pro: 1000, business: 6000 };
-  const currentLimit = limits[plan];
-
-  if (uniqueProducts > currentLimit) {
-    translateBtn.disabled = true;
-    authWarning.classList.remove('hidden');
-
-    if (plan === 'free') {
-      if (!state.user) {
-        authWarningTitle.textContent = 'Límite de 10 productos superado';
-        authWarningText.innerHTML = 'Para traducir archivos de este tamaño necesitas estar registrado. <a href="#" id="authWarningLink">Inicia sesión aquí</a> o <a href="#" id="seePricingLink">ver planes de pago</a>.';
-        $('authWarningLink').onclick = (e) => { e.preventDefault(); loginBtn.click(); };
-        $('seePricingLink').onclick = (e) => { e.preventDefault(); pricingModal.classList.remove('hidden'); };
-      } else {
-        authWarningTitle.textContent = 'Límite de Plan Gratis superado';
-        authWarningText.innerHTML = 'Tu plan actual tiene un límite de 10 productos. <a href="#" id="upgradeLink">Sube a Pro para traducir hasta 1.000 productos</a>.';
-        $('upgradeLink').onclick = (e) => { e.preventDefault(); pricingModal.classList.remove('hidden'); };
-      }
-    } else {
-      authWarningTitle.textContent = `Límite de Plan ${plan.toUpperCase()} superado`;
-      authWarningText.innerHTML = `Este archivo tiene ${uniqueProducts} productos, superando tu límite de ${currentLimit}. <a href="#" id="upgradeLink">Contacta con soporte para ampliar</a>.`;
-      $('upgradeLink').onclick = (e) => { e.preventDefault(); alert('Contactando con soporte...'); };
-    }
-  } else {
-    translateBtn.disabled = false;
-    authWarning.classList.add('hidden');
-  }
-}
-
-// ── Usage Tracking ─────────────────────────────────────────
-function incrementUsage(count) {
-  if (state.user) {
-    state.user.usage = (state.user.usage || 0) + count;
-    state.user.filesProcessed = (state.user.filesProcessed || 0) + 1;
-    saveUserState();
-    updateAuthUI();
-  }
-}
-
-function saveUserState() {
-  if (state.user) {
-    localStorage.setItem('csv_translator_user', JSON.stringify(state.user));
-  }
-}
-
-// Las credenciales de admin se verifican en el servidor (/api/auth/login).
-
-
-
-// Restore Dashboard Handlers
-miCuentaBtn.onclick = () => {
-  if (!state.user) return;
-  updateDashboardUI();
-  dashboardModal.classList.remove('hidden');
-};
-
-closeDashboardModal.onclick = () => dashboardModal.classList.add('hidden');
-
-dashNavItems.forEach(item => {
-  item.onclick = () => {
-    currentDashView = item.dataset.view;
-    updateDashboardUI();
-  };
-});
-
-function updateDashboardUI() {
-  if (!state.user) return;
-
-  dashEmail.textContent = state.user.email;
-  const plan = state.user.plan;
-  const planName = plan === 'unlimited' ? 'Admin Ilimitado' : plan === 'pro' ? 'Plan Pro' : plan === 'business' ? 'Business' : 'Gratis';
-  dashPlan.textContent = planName;
-  dashPlan.className = 'badge-sub ' + (plan || 'free');
-
-  // Navigation
-  dashNavItems.forEach(i => i.classList.toggle('active', i.dataset.view === currentDashView));
-  dashViews.forEach(v => v.classList.toggle('hidden', v.id !== `dashView-${currentDashView}`));
-
-  // Stats
-  const currentPlan = state.user.plan || 'free';
-  const limits = { free: 10, pro: 1000, business: 6000, unlimited: Infinity };
-  const max = limits[currentPlan];
-  const current = state.user.usage || 0;
-
-  if (plan === 'unlimited') {
-    usageCount.textContent = `${current.toLocaleString()} / ∞`;
-    usageBarFill.style.width = '0%'; // Or 100% depending on preference, Infinity is tricky
-  } else {
-    usageCount.textContent = `${current.toLocaleString()} / ${max.toLocaleString()}`;
-    const pct = Math.min(100, (current / max) * 100);
-    usageBarFill.style.width = pct + '%';
-  }
-  dashFilesCount.textContent = state.user.filesProcessed || 0;
-
-  // Show/Hide Upgrade/Cancel buttons based on plan
-  if (state.user.plan === 'unlimited' || state.user.role === 'admin') {
-    dashUpgradeContainer.classList.add('hidden');
-    dashUpgradeBtn.classList.add('hidden');
-    cancelSubBtn.classList.add('hidden');
-  } else if (state.user.plan === 'business') {
-    dashUpgradeContainer.classList.add('hidden');
-    dashUpgradeBtn.classList.add('hidden');
-    cancelSubBtn.classList.remove('hidden');
-  } else if (state.user.plan === 'pro') {
-    dashUpgradeContainer.classList.remove('hidden');
-    dashUpgradeBtn.classList.remove('hidden');
-    cancelSubBtn.classList.remove('hidden');
-  } else {
-    // Free
-    dashUpgradeContainer.classList.remove('hidden');
-    dashUpgradeBtn.classList.remove('hidden');
-    cancelSubBtn.classList.add('hidden');
-  }
-
-  // Show/Hide Admin Tab
-  if (state.user.role === 'admin') {
-    navAdmin.classList.remove('hidden');
-    if (currentDashView === 'admin') updateAdminDash();
-  } else {
-    navAdmin.classList.add('hidden');
-    if (currentDashView === 'admin') currentDashView = 'stats';
-  }
-
-  // Billing History
-  const historyBody = document.querySelector('#billingHistory tbody');
-  if (historyBody) {
-    historyBody.innerHTML = (state.user.billingHistory || []).map(h => `
-      <tr>
-        <td>${h.date}</td>
-        <td>Suscripción ${h.plan}</td>
-        <td><span class="badge-sub" style="background:#059669;color:white;padding:2px 8px;border-radius:10px">Pagado</span></td>
-        <td>${h.amount}</td>
-      </tr>
-    `).join('') || '<tr><td colspan="4" class="center muted">Sin transacciones</td></tr>';
-  }
-}
-
-// ── Payment Logic (Mock Stripe) ──────────────────────────────
-function handleUpgrade(plan) {
-  if (!state.user) {
-    alert('Por favor, inicia sesión para suscribirte.');
-    pricingModal.classList.add('hidden');
-    loginBtn.click();
-    return;
-  }
-  pendingPlanUpgrade = plan;
-  pricingModal.classList.add('hidden');
-  paymentModal.classList.remove('hidden');
-}
-
-closePaymentModal.onclick = () => paymentModal.classList.add('hidden');
-
-// Card Formatting
-cardNumber.oninput = (e) => {
-  let v = e.target.value.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
-  let parts = [];
-  for (let i = 0, len = v.length; i < len; i += 4) {
-    parts.push(v.substring(i, i + 4));
-  }
-  if (parts.length) e.target.value = parts.join(' ');
-};
-
-cardExpiry.oninput = (e) => {
-  let v = e.target.value.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
-  if (v.length >= 2) e.target.value = v.substring(0, 2) + '/' + v.substring(2, 4);
-};
-
-paymentForm.onsubmit = async (e) => {
-  e.preventDefault();
-  paymentError.classList.add('hidden');
-  paymentBtnText.classList.add('hidden');
-  paymentSpinner.classList.remove('hidden');
-
-  // Simulate Network Delay (Stripe-like)
-  await new Promise(r => setTimeout(r, 2000));
-
-  const plan = pendingPlanUpgrade;
-  const prices = { pro: '$29,99', business: '$99,99' };
-
-  // Success
-  state.user.plan = plan;
-  state.user.billingHistory = state.user.billingHistory || [];
-  state.user.billingHistory.unshift({
-    date: new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }),
-    plan: plan.toUpperCase(),
-    amount: prices[plan]
-  });
-
-  saveUserState();
-  updateAuthUI();
-
-  paymentSpinner.classList.add('hidden');
-  paymentBtnText.classList.remove('hidden');
-  paymentModal.classList.add('hidden');
-  alert(`¡Pago exitoso! Bienvenido al Plan ${plan.toUpperCase()}`);
-};
-
-// ── Auth Logic ─────────────────────────────────────────────
-function initAuth() {
-  const savedUser = localStorage.getItem('csv_translator_user');
-  if (!savedUser) return;
-
-  state.user = JSON.parse(savedUser);
-
-  // Super-Admin override
-  if (state.user?.email === 'esbabyjei@gmail.com') {
-    state.user.role = 'admin';
-    state.user.plan = 'unlimited';
-  }
-
-  updateAuthUI();
-
-  // Si es admin, verificar que la sesión del servidor sigue vigente
-  if (state.user?.role === 'admin') {
-    const token = localStorage.getItem('auth_token');
-    if (!token) {
-      state.user = null;
-      localStorage.removeItem('csv_translator_user');
-      updateAuthUI();
-      return;
-    }
-    fetch('/api/auth/verify', { headers: { 'Authorization': `Bearer ${token}` } })
-      .then(r => r.json())
-      .then(data => {
-        if (!data.success) {
-          state.user = null;
-          localStorage.removeItem('csv_translator_user');
-          localStorage.removeItem('auth_token');
-          updateAuthUI();
-        }
-      })
-      .catch(() => { /* servidor no disponible, mantener sesión local */ });
-  }
-}
-
-loginBtn.onclick = () => {
-  currentAuthTab = 'login';
-  updateAuthModalUI();
-  authModal.classList.remove('hidden');
-};
-
-if (authWarningLink) {
-  authWarningLink.onclick = (e) => {
-    e.preventDefault();
-    loginBtn.click();
-  };
-}
-
-closeAuthModal.onclick = () => authModal.classList.add('hidden');
-
-authTabs.forEach(tab => {
-  tab.onclick = () => {
-    currentAuthTab = tab.dataset.tab;
-    updateAuthModalUI();
-  };
-});
-
-function updateAuthModalUI() {
-  authTabs.forEach(t => t.classList.toggle('active', t.dataset.tab === currentAuthTab));
-  authSubmitBtn.textContent = currentAuthTab === 'login' ? 'Iniciar Sesión' : 'Crear Cuenta';
-  authError.classList.add('hidden');
-}
-
-authForm.onsubmit = async (e) => {
-  e.preventDefault();
-  const email = authEmail.value.trim();
-  const password = authPassword.value;
-
-  if (password.length < 6) {
-    authError.textContent = 'La contraseña debe tener al menos 6 caracteres';
-    authError.classList.remove('hidden');
-    return;
-  }
-
-  authSubmitBtn.disabled = true;
-  authError.classList.add('hidden');
-
-  try {
-    // Verificar credenciales contra el servidor (admin)
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
-    const data = await res.json();
-
-    if (data.success) {
-      // Admin autenticado por el servidor
-      localStorage.setItem('auth_token', data.token);
-      state.user = {
-        ...data.user,
-        regDate: new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }),
-      };
-      // No es admin — usuario normal (mock)
-      const existingUser = JSON.parse(localStorage.getItem('csv_translator_user'));
-      const plan = currentAuthTab === 'login' ? (existingUser?.plan || 'free') : 'free';
-
-      state.user = {
-        email,
-        plan,
-        role: 'user',
-        usage: existingUser?.usage || 0,
-        filesProcessed: existingUser?.filesProcessed || 0,
-        billingHistory: existingUser?.billingHistory || [],
-        regDate: existingUser?.regDate || new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }),
-      };
-
-      // Super-Admin hardcode for the owner
-      if (email === 'esbabyjei@gmail.com') {
-        state.user.role = 'admin';
-        state.user.plan = 'unlimited';
-      }
-    } else {
-      authError.textContent = data.error || 'Error del servidor';
-      authError.classList.remove('hidden');
-      return;
-    }
-  } catch {
-    // Servidor no disponible — solo permite usuarios normales (mock)
-    const existingUser = JSON.parse(localStorage.getItem('csv_translator_user'));
-    const plan = currentAuthTab === 'login' ? (existingUser?.plan || 'free') : 'free';
-    state.user = {
-      email,
-      plan,
-      role: 'user',
-      usage: existingUser?.usage || 0,
-      filesProcessed: existingUser?.filesProcessed || 0,
-      billingHistory: existingUser?.billingHistory || [],
-      regDate: existingUser?.regDate || new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }),
-    };
-  } finally {
-    authSubmitBtn.disabled = false;
-  }
-
-  // Añadir a allUsers para la vista del admin
-  const allUsers = JSON.parse(localStorage.getItem('allUsers') || '[]');
-  if (!allUsers.find(u => u.email === email)) {
-    allUsers.push(state.user);
-    localStorage.setItem('allUsers', JSON.stringify(allUsers));
-  }
-
-  saveUserState();
-  updateAuthUI();
-  authModal.classList.add('hidden');
-  authForm.reset();
-};
-
-logoutBtn.onclick = async () => {
-  const token = localStorage.getItem('auth_token');
-  if (token) {
-    try {
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-    } catch { /* ignorar si el servidor no está disponible */ }
-    localStorage.removeItem('auth_token');
-  }
-  state.user = null;
-  localStorage.removeItem('csv_translator_user');
-  updateAuthUI();
-};
-
-// Initialize
-initAuth();
-
-// ── Subscription Logic ──────────────────────────────────────
-upgradeBtns.forEach(btn => {
-  btn.onclick = () => {
-    const plan = btn.dataset.plan;
-    handleUpgrade(plan);
-  };
-});
-
-dashUpgradeBtn.onclick = () => {
-  dashboardModal.classList.add('hidden');
-  pricingModal.classList.remove('hidden');
-};
-
-cancelSubBtn.onclick = () => {
-  if (confirm('¿Estás seguro de que quieres cancelar tu suscripción? Volverás al Plan Gratis.')) {
-    state.user.plan = 'free';
-    saveUserState();
-    updateAuthUI();
-    updateDashboardUI();
-    alert('Tu suscripción ha sido cancelada.');
-  }
-};
-
-closePricingModal.onclick = () => pricingModal.classList.add('hidden');
 
 downloadBtn.addEventListener('click', downloadCSV);
 
@@ -1633,247 +1317,6 @@ startOverBtn.addEventListener('click', () => {
 });
 
 // ── Helpers ────────────────────────────────────────────────
-// ── Admin Logic ───────────────────────────────────────────
-
-window.banUser = (email) => {
-  const allUsers = JSON.parse(localStorage.getItem('allUsers') || '[]');
-  const user = allUsers.find(u => u.email === email);
-  if (user) {
-    user.status = 'banned';
-    localStorage.setItem('allUsers', JSON.stringify(allUsers));
-    updateAdminDash();
-  }
-};
-
-window.activateUser = (email) => {
-  const allUsers = JSON.parse(localStorage.getItem('allUsers') || '[]');
-  const user = allUsers.find(u => u.email === email);
-  if (user) {
-    user.status = 'active';
-    localStorage.setItem('allUsers', JSON.stringify(allUsers));
-    updateAdminDash();
-  }
-};
-
-function seedUsers() {
-  if (localStorage.getItem('allUsers')) return;
-  const mockUsers = [
-    { email: 'admin@example.com', role: 'admin', plan: 'business', status: 'active', regDate: '01 Ene, 2026', name: 'Jefe Admin' },
-    { email: 'user1@test.com', role: 'user', plan: 'pro', status: 'active', regDate: '10 Feb, 2026', name: 'Alfonso Pérez', usage: 950 },
-    { email: 'user2@test.com', role: 'user', plan: 'free', status: 'banned', regDate: '12 Feb, 2026', name: 'Banned Guy' },
-    { email: 'scammer@test.com', role: 'user', plan: 'business', status: 'active', regDate: '15 Feb, 2026', name: 'Multi IP User', ips: ['1.1.1.1', '2.2.2.2', '3.3.3.3', '4.4.4.4'] },
-  ];
-  localStorage.setItem('allUsers', JSON.stringify(mockUsers));
-}
-
-seedUsers();
-updateAdminDash();
-renderFaqManager();
-
-// ── Admin Dash Expansion ──────────────────────────────────
-function updateAdminDash() {
-  const allUsers = JSON.parse(localStorage.getItem('allUsers') || '[]');
-
-  // Stats calculation
-  let mrr = 0;
-  let proCount = 0;
-  let bizCount = 0;
-  let freeCount = 0;
-
-  allUsers.forEach(u => {
-    if (u.plan === 'pro') { mrr += 29.99; proCount++; }
-    else if (u.plan === 'business') { mrr += 99.99; bizCount++; }
-    else { freeCount++; }
-  });
-
-  adminMRR.textContent = `$${mrr.toFixed(2)}`;
-  adminUserRatios.textContent = `${proCount} Pro / ${bizCount} Biz`;
-
-  // User Table
-  const userBody = adminUserTable.querySelector('tbody');
-  userBody.innerHTML = allUsers.map(u => `
-    <tr>
-      <td>
-        <div class="user-info">
-          <strong>${u.email}</strong>
-          <span class="xsmall muted">${u.name || 'Sin nombre'}</span>
-        </div>
-      </td>
-      <td><span class="badge-role ${u.role}">${u.role}</span></td>
-      <td>${u.regDate || 'N/A'}</td>
-      <td><span class="badge-status ${u.status === 'banned' ? 'banned' : 'active'}">${u.status === 'banned' ? 'Baneado' : 'Activo'}</span></td>
-      <td>
-        ${u.status === 'banned'
-      ? `<button class="btn-text" onclick="activateUser('${u.email}')">Reactivar</button>`
-      : `<button class="btn-text danger" onclick="banUser('${u.email}')">Banear</button>`}
-      </td>
-    </tr>
-  `).join('');
-
-  // Abuse Detection
-  const alerts = [];
-  allUsers.forEach(u => {
-    if (u.usage > 900) {
-      alerts.push({ type: 'Uso Crítico', user: u.email, detail: 'Consumo superior al 90% del límite mensual.' });
-    }
-    if (u.ips && u.ips.length > 3) {
-      alerts.push({ type: 'Multi-IP', user: u.email, detail: `Inicios de sesión desde ${u.ips.length} direcciones distintas.` });
-    }
-  });
-
-  abuseAlerts.innerHTML = alerts.map(a => `
-    <div class="abuse-card">
-      <div class="abuse-icon">⚠️</div>
-      <div class="abuse-content">
-        <h4>${a.type}: ${a.user}</h4>
-        <p>${a.detail}</p>
-      </div>
-    </div>
-  `).join('') || '<p class="muted center">No hay alertas activas</p>';
-
-  // Mock Failed Payments
-  const failedBody = adminFailedPayments.querySelector('tbody');
-  failedBody.innerHTML = `
-    <tr><td>20 Feb, 10:45</td><td>john@doe.com</td><td>Fondos insuficientes</td></tr>
-    <tr><td>19 Feb, 14:20</td><td>jane@test.nl</td><td>Tarjeta expirada</td></tr>
-  `;
-
-  // Update Logs
-  updateLogsTable();
-}
-
-/**
- * Centered error logger for the whole application.
- * Persists errors in localStorage for Admin view.
- */
-function logError(url, errorMsg) {
-  const logs = JSON.parse(localStorage.getItem('system_logs') || '[]');
-  const now = new Date();
-  const newLog = {
-    time: now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
-    url: url,
-    error: errorMsg,
-    user: state.user?.email || 'Huésped',
-    timestamp: now.getTime()
-  };
-
-  // Keep only the last 50 logs
-  logs.unshift(newLog);
-  if (logs.length > 50) logs.pop();
-
-  localStorage.setItem('system_logs', JSON.stringify(logs));
-
-  // If we are currently in the Admin view, refresh it
-  if (currentDashView === 'admin') updateLogsTable();
-}
-
-function updateLogsTable() {
-  const filter = logFilter.value;
-  let logs = JSON.parse(localStorage.getItem('system_logs') || '[]');
-
-  // If empty, show some initial mock help if it's the first time
-  if (logs.length === 0) {
-    logs = [
-      { time: '12:45', url: '/api/translate', error: 'Ejemplo: Error de red', user: 'admin@example.com', timestamp: Date.now() - 15 * 60000 }
-    ];
-  }
-
-  if (filter === '1h') {
-    logs = logs.filter(l => l.timestamp > Date.now() - 3600000);
-  } else if (filter === '24h') {
-    logs = logs.filter(l => l.timestamp > Date.now() - 86400000);
-  }
-
-  const logBody = adminLogsTable.querySelector('tbody');
-  logBody.innerHTML = logs.map(l => `
-    <tr>
-      <td>${l.time}</td>
-      <td><code class="xsmall">${l.url}</code></td>
-      <td><span class="danger">${l.error}</span></td>
-      <td>${l.user}</td>
-    </tr>
-  `).join('') || '<tr><td colspan="4" class="center muted">Sin errores en este periodo</td></tr>';
-}
-
-logFilter.onchange = updateLogsTable;
-
-// ── FAQ Manager ───────────────────────────────────────────
-let editingFaqId = null;
-
-function renderFaqManager() {
-  const faqs = JSON.parse(localStorage.getItem('faqs') || '[]');
-  if (faqs.length === 0 && !localStorage.getItem('faqs')) {
-    // Default FAQs
-    const defaults = [
-      { id: Date.now(), q: '¿Es seguro subir mis archivos?', a: 'Sí, los archivos se procesan en el navegador o se eliminan tras la traducción.' },
-      { id: Date.now() + 1, q: '¿Qué formatos soportan?', a: 'Soportamos archivos CSV estándar y exportaciones de Shopify.' }
-    ];
-    localStorage.setItem('faqs', JSON.stringify(defaults));
-    return renderFaqManager();
-  }
-
-  faqManagerList.innerHTML = faqs.map(f => `
-    <div class="faq-manager-item">
-      <h4>
-        ${f.q}
-        <div class="faq-actions">
-          <button class="btn-text btn-sm" onclick="editFaq(${f.id})">Editar</button>
-          <button class="btn-text danger btn-sm" onclick="deleteFaq(${f.id})">Borrar</button>
-        </div>
-      </h4>
-      <p>${f.a}</p>
-    </div>
-  `).join('') || '<p class="muted center">No hay preguntas configuradas</p>';
-}
-
-window.editFaq = (id) => {
-  const faqs = JSON.parse(localStorage.getItem('faqs') || '[]');
-  const faq = faqs.find(f => f.id === id);
-  if (faq) {
-    editingFaqId = id;
-    faqModalTitle.textContent = 'Editar Pregunta';
-    faqQuestionInput.value = faq.q;
-    faqAnswerInput.value = faq.a;
-    faqModal.classList.remove('hidden');
-  }
-};
-
-window.deleteFaq = (id) => {
-  if (confirm('¿Borrar esta pregunta?')) {
-    let faqs = JSON.parse(localStorage.getItem('faqs') || '[]');
-    faqs = faqs.filter(f => f.id !== id);
-    localStorage.setItem('faqs', JSON.stringify(faqs));
-    renderFaqManager();
-  }
-};
-
-addFaqBtn.onclick = () => {
-  editingFaqId = null;
-  faqModalTitle.textContent = 'Nueva Pregunta';
-  faqQuestionInput.value = '';
-  faqAnswerInput.value = '';
-  faqModal.classList.remove('hidden');
-};
-
-closeFaqModal.onclick = () => faqModal.classList.add('hidden');
-
-saveFaqBtn.onclick = () => {
-  const q = faqQuestionInput.value.trim();
-  const a = faqAnswerInput.value.trim();
-  if (!q || !a) return alert('Rellena todos los campos');
-
-  let faqs = JSON.parse(localStorage.getItem('faqs') || '[]');
-  if (editingFaqId) {
-    const f = faqs.find(item => item.id === editingFaqId);
-    if (f) { f.q = q; f.a = a; }
-  } else {
-    faqs.push({ id: Date.now(), q, a });
-  }
-
-  localStorage.setItem('faqs', JSON.stringify(faqs));
-  faqModal.classList.add('hidden');
-  renderFaqManager();
-};
 // ── Helpers ────────────────────────────────────────────────
 function escapeHtml(str) {
   return String(str ?? '')
