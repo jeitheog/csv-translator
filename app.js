@@ -126,6 +126,7 @@ const stepSelect = $('step-select');
 const productsGrid = $('productsGrid');
 const continueWithSelected = $('continueWithSelected');
 const selectProductCountEl = $('selectProductCount');
+const productSearchInput = $('productSearchInput');
 const selectAllProductsBtn = $('selectAllProducts');
 const deselectAllProductsBtn = $('deselectAllProducts');
 const backToUploadBtn = $('backToUpload');
@@ -230,6 +231,7 @@ function showProductSelect(products) {
   stepConfigure.classList.add('hidden');
 
   productsGrid.innerHTML = '';
+  productSearchInput.value = '';
   const selected = new Set(products.map((_, i) => i));
 
   function updateCount() {
@@ -243,6 +245,7 @@ function showProductSelect(products) {
     const card = document.createElement('div');
     card.className = 'product-card selected';
     card.dataset.index = i;
+    card.dataset.title = p.title.toLowerCase();
     card.innerHTML = `
       <input type="checkbox" checked />
       ${img ? `<img src="${img}" alt="${p.title}" loading="lazy" />` : '<div style="width:100%;aspect-ratio:1;background:rgba(255,255,255,0.08);border-radius:8px;"></div>'}
@@ -267,9 +270,20 @@ function showProductSelect(products) {
 
   updateCount();
 
+  // ── Search filter ──
+  productSearchInput.oninput = () => {
+    const q = productSearchInput.value.trim().toLowerCase();
+    productsGrid.querySelectorAll('.product-card').forEach(c => {
+      c.style.display = (!q || c.dataset.title.includes(q)) ? '' : 'none';
+    });
+  };
+
+  // ── Select / deselect only visible cards ──
   selectAllProductsBtn.onclick = () => {
-    productsGrid.querySelectorAll('.product-card').forEach((c, i) => {
-      selected.add(i);
+    productsGrid.querySelectorAll('.product-card').forEach(c => {
+      if (c.style.display === 'none') return;
+      const idx = parseInt(c.dataset.index);
+      selected.add(idx);
       c.classList.add('selected');
       c.querySelector('input').checked = true;
     });
@@ -277,8 +291,10 @@ function showProductSelect(products) {
   };
 
   deselectAllProductsBtn.onclick = () => {
-    selected.clear();
     productsGrid.querySelectorAll('.product-card').forEach(c => {
+      if (c.style.display === 'none') return;
+      const idx = parseInt(c.dataset.index);
+      selected.delete(idx);
       c.classList.remove('selected');
       c.querySelector('input').checked = false;
     });
