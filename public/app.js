@@ -47,26 +47,39 @@ const SHOPIFY_CLEARED_COLS = new Set([
 ]);
 
 // Keywords that identify a color option (case-insensitive)
-const COLOR_KEYWORDS = ['color', 'colour', 'farbe', 'kleur', 'couleur'];
+const COLOR_KEYWORDS = ['color', 'colour', 'farbe', 'kleur', 'couleur', 'colore', 'cor', 'coloris', 'kulur', 'väri', 'farge', 'färg'];
 
 function addColorOptionValues(headers, rows) {
-  // For each Option Name column, check if its value is color-related
-  // If so, add the corresponding Option Value column to translatable set
-  const optionPairs = [
-    ['Option1 Name', 'Option1 Value'], ['Option1 name', 'Option1 value'],
-    ['Option2 Name', 'Option2 Value'], ['Option2 name', 'Option2 value'],
-    ['Option3 Name', 'Option3 Value'], ['Option3 name', 'Option3 value'],
-  ];
   const extra = new Set();
-  for (const [nameCol, valueCol] of optionPairs) {
-    const nameIdx = headers.indexOf(nameCol);
-    if (nameIdx < 0) continue;
-    // Check first non-empty row for the option name
-    for (const row of rows) {
-      const name = (row[nameIdx] || '').trim().toLowerCase();
-      if (name && COLOR_KEYWORDS.some(k => name.includes(k))) {
-        extra.add(valueCol);
-        break;
+  const normalizedHeaders = headers.map(h => h.toLowerCase());
+
+  // 1. Direct detection: If a header IS a color keyword, treat it as translatable
+  headers.forEach((h, idx) => {
+    const hLow = h.toLowerCase();
+    if (COLOR_KEYWORDS.some(k => hLow === k || hLow.includes(k + ' ') || hLow.includes(' ' + k))) {
+      extra.add(h);
+    }
+  });
+
+  // 2. Pair detection: Check OptionX Name -> OptionX Value
+  const optionPairs = [
+    ['option1 name', 'option1 value'],
+    ['option2 name', 'option2 value'],
+    ['option3 name', 'option3 value'],
+  ];
+
+  for (const [nameMatch, valueMatch] of optionPairs) {
+    const nameIdx = normalizedHeaders.indexOf(nameMatch);
+    const valueIdx = normalizedHeaders.indexOf(valueMatch);
+
+    if (nameIdx >= 0 && valueIdx >= 0) {
+      // Check first 10 rows for the option name value (e.g. "Color")
+      for (let i = 0; i < Math.min(rows.length, 10); i++) {
+        const val = (rows[i][nameIdx] || '').trim().toLowerCase();
+        if (val && COLOR_KEYWORDS.some(k => val.includes(k))) {
+          extra.add(headers[valueIdx]);
+          break;
+        }
       }
     }
   }
@@ -567,8 +580,9 @@ function buildColumnsGrid() {
     if (shouldTranslate && !shouldClearByDefault) chip.classList.add('selected');
     chip.dataset.idx = idx;
 
-    // In Shopify mode, lock non-translatable columns visually (unless they are cleared columns)
-    const locked = state.isShopify && !SHOPIFY_TRANSLATABLE_COLS.has(header) && !shouldClearByDefault;
+    // In Shopify mode, lock non-translatable columns visually (unless they are cleared columns or identified color columns)
+    const isActuallyTranslatable = normalizedTranslatable.has(hLower) || normalizedColorCols.has(hLower);
+    const locked = state.isShopify && !isActuallyTranslatable && !shouldClearByDefault;
     if (locked) chip.classList.add('locked');
 
     let recommendTag = '';
@@ -1257,8 +1271,8 @@ function buildCSVContent() {
 
   // Shopify requires these exact values on variant rows only
   const invPolicyIdx = state.headers.indexOf('Variant Inventory Policy');
-  const fulfillIdx   = state.headers.indexOf('Variant Fulfillment Service');
-  const priceIdx     = state.headers.indexOf('Variant Price');
+  const fulfillIdx = state.headers.indexOf('Variant Fulfillment Service');
+  const priceIdx = state.headers.indexOf('Variant Price');
 
   const VALID_INV_POLICIES = new Set(['deny', 'continue']);
 
@@ -1404,13 +1418,13 @@ function formatBytes(bytes) {
 
 // ── Shopify Direct Import ───────────────────────────────────
 (function () {
-  const storeInput  = $('shopifyDestStore');
-  const tokenInput  = $('shopifyDestToken');
-  const toggleBtn   = $('shopifyTokenToggle');
-  const testBtn     = $('shopifyTestConn');
-  const connStatus  = $('shopifyConnStatus');
-  const importBtn   = $('shopifyDirectImport');
-  const importLog   = $('shopifyImportLog');
+  const storeInput = $('shopifyDestStore');
+  const tokenInput = $('shopifyDestToken');
+  const toggleBtn = $('shopifyTokenToggle');
+  const testBtn = $('shopifyTestConn');
+  const connStatus = $('shopifyConnStatus');
+  const importBtn = $('shopifyDirectImport');
+  const importLog = $('shopifyImportLog');
 
   if (!storeInput) return; // guard if elements not present
 
@@ -1468,7 +1482,7 @@ function formatBytes(bytes) {
     for (let i = 0; i < products.length; i++) {
       const orig = products[i];
       const payload = buildShopifyPayload(orig);
-      const logItem = addLogItem(`⏳ (${i+1}/${products.length}) ${orig.title}...`);
+      const logItem = addLogItem(`⏳ (${i + 1}/${products.length}) ${orig.title}...`);
 
       try {
         const res = await fetch('/api/shopify/products', {
@@ -1478,16 +1492,16 @@ function formatBytes(bytes) {
         });
         const data = await res.json();
         if (data.success) {
-          logItem.textContent = `✅ (${i+1}/${products.length}) ${orig.title} — ${data.product.variants_count} variante(s)`;
+          logItem.textContent = `✅ (${i + 1}/${products.length}) ${orig.title} — ${data.product.variants_count} variante(s)`;
           logItem.style.color = '#4ade80';
           ok++;
         } else {
-          logItem.textContent = `❌ (${i+1}/${products.length}) ${orig.title}: ${JSON.stringify(data.error)}`;
+          logItem.textContent = `❌ (${i + 1}/${products.length}) ${orig.title}: ${JSON.stringify(data.error)}`;
           logItem.style.color = '#f87171';
           fail++;
         }
       } catch (e) {
-        logItem.textContent = `❌ (${i+1}/${products.length}) ${orig.title}: ${e.message}`;
+        logItem.textContent = `❌ (${i + 1}/${products.length}) ${orig.title}: ${e.message}`;
         logItem.style.color = '#f87171';
         fail++;
       }
@@ -1506,26 +1520,23 @@ function formatBytes(bytes) {
   function buildShopifyPayload(orig) {
     // Get translated text from state.translatedRows by matching Handle
     const handleIdx = state.headers.indexOf('Handle');
-    const titleIdx  = state.headers.indexOf('Title');
-    const bodyIdx   = state.headers.indexOf('Body (HTML)');
-    const tagsIdx   = state.headers.indexOf('Tags');
-    const opt1NameIdx  = state.headers.indexOf('Option1 Name');
-    const opt2NameIdx  = state.headers.indexOf('Option2 Name');
-    const opt3NameIdx  = state.headers.indexOf('Option3 Name');
-    const opt1ValIdx   = state.headers.indexOf('Option1 Value');
-    const opt2ValIdx   = state.headers.indexOf('Option2 Value');
-    const opt3ValIdx   = state.headers.indexOf('Option3 Value');
-    const priceColIdx  = state.headers.indexOf('Variant Price');
+    const titleIdx = state.headers.indexOf('Title');
+    const bodyIdx = state.headers.indexOf('Body (HTML)');
+    const opt1NameIdx = state.headers.indexOf('Option1 Name');
+    const opt2NameIdx = state.headers.indexOf('Option2 Name');
+    const opt3NameIdx = state.headers.indexOf('Option3 Name');
+    const opt1ValIdx = state.headers.indexOf('Option1 Value');
+    const opt2ValIdx = state.headers.indexOf('Option2 Value');
+    const opt3ValIdx = state.headers.indexOf('Option3 Value');
+    const priceColIdx = state.headers.indexOf('Variant Price');
 
     const allProductRows = state.translatedRows.filter(r => (r[handleIdx] || '') === orig.handle);
     // Variant rows are those with a non-empty Variant Price; image-only rows have empty price
     const variantRows = allProductRows.filter(r => priceColIdx < 0 || (r[priceColIdx] || '').trim() !== '');
     const firstRow = variantRows.find(r => (r[titleIdx] || '').trim()) || variantRows[0] || [];
 
-    const title     = (firstRow[titleIdx] || orig.title || '').trim();
-    const body_html = (firstRow[bodyIdx]  || orig.body_html || '').trim();
-    const tags      = (tagsIdx >= 0 ? firstRow[tagsIdx] : '') || (Array.isArray(orig.tags) ? orig.tags.join(', ') : orig.tags) || '';
-
+    const title = (firstRow[titleIdx] || orig.title || '').trim();
+    const body_html = (firstRow[bodyIdx] || orig.body_html || '').trim();
     // Option names (possibly translated)
     const opt1Name = (opt1NameIdx >= 0 ? firstRow[opt1NameIdx] : '') || (orig.options?.[0]?.name || '');
     const opt2Name = (opt2NameIdx >= 0 ? firstRow[opt2NameIdx] : '') || (orig.options?.[1]?.name || '');
@@ -1544,7 +1555,7 @@ function formatBytes(bytes) {
     });
 
     const options = (orig.options || []).map((opt, idx) => {
-      const name   = [opt1Name, opt2Name, opt3Name][idx] || opt.name;
+      const name = [opt1Name, opt2Name, opt3Name][idx] || opt.name;
       const values = [vals1, vals2, vals3][idx];
       return { name, values: values && values.length ? values : opt.values };
     });
@@ -1587,8 +1598,8 @@ function formatBytes(bytes) {
       title,
       body_html,
       vendor: orig.vendor || '',
-      product_type: orig.product_type || '',
-      tags,
+      product_type: '',
+      tags: '',
       status: 'active',
       options: options.length ? options : undefined,
       variants,
