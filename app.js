@@ -1205,7 +1205,11 @@ function updateDashboardUI() {
   dashFilesCount.textContent = state.user.filesProcessed || 0;
 
   // Show/Hide Upgrade/Cancel buttons based on plan
-  if (state.user.plan === 'business') {
+  if (state.user.plan === 'unlimited') {
+    dashUpgradeContainer.classList.add('hidden');
+    dashUpgradeBtn.classList.add('hidden');
+    cancelSubBtn.classList.add('hidden');
+  } else if (state.user.plan === 'business') {
     dashUpgradeContainer.classList.add('hidden');
     dashUpgradeBtn.classList.add('hidden');
     cancelSubBtn.classList.remove('hidden');
