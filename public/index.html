@@ -220,6 +220,48 @@
           🔄 Traducir otro archivo
         </button>
       </div>
+
+      <!-- ── Shopify Direct Import ── -->
+      <div class="shopify-import-panel" id="shopifyImportPanel" style="display:none;">
+        <div class="import-divider" style="margin:24px 0 16px;">── O importa directamente a tu tienda Shopify ──</div>
+
+        <div class="shopify-creds-row">
+          <input id="shopifyDestStore" type="text"
+                 placeholder="mi-tienda.myshopify.com"
+                 class="select" style="flex:1;padding:10px;" />
+          <div style="position:relative;flex:1;">
+            <input id="shopifyDestToken" type="password"
+                   placeholder="Access token (shpat_...)"
+                   class="select" style="width:100%;padding:10px;box-sizing:border-box;" />
+            <button id="shopifyTokenToggle"
+                    style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:rgba(255,255,255,0.5);font-size:0.85rem;">
+              👁
+            </button>
+          </div>
+          <button class="btn btn-outline" id="shopifyTestConn">🔗 Verificar</button>
+        </div>
+
+        <p id="shopifyConnStatus" class="config-hint" style="display:none;margin-top:8px;"></p>
+
+        <details style="margin:10px 0;">
+          <summary style="cursor:pointer;font-size:0.82rem;color:rgba(255,255,255,0.45);">
+            ¿Cómo obtener el Access Token?
+          </summary>
+          <ol style="font-size:0.82rem;color:rgba(255,255,255,0.55);margin:8px 0 0 16px;line-height:1.8;">
+            <li>Ve a tu Shopify Admin → <strong>Settings → Apps → Develop apps</strong></li>
+            <li>Crea una nueva app (dale cualquier nombre)</li>
+            <li>En <strong>Configuration</strong> → Admin API scopes: activa <code>write_products</code> y <code>read_products</code></li>
+            <li>Haz clic en <strong>Install app</strong></li>
+            <li>Copia el <strong>Admin API access token</strong> (empieza por <code>shpat_</code>)</li>
+          </ol>
+        </details>
+
+        <button class="btn btn-primary" id="shopifyDirectImport" disabled style="width:100%;margin-top:12px;">
+          🚀 Importar productos a Shopify
+        </button>
+
+        <div id="shopifyImportLog" style="display:none;margin-top:16px;max-height:260px;overflow-y:auto;border-radius:10px;border:1px solid rgba(255,255,255,0.08);padding:12px;font-size:0.85rem;"></div>
+      </div>
     </section>
 
   </main>

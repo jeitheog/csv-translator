@@ -11,6 +11,8 @@ const state = {
   translatedRows: [],
   fileName: '',
   isShopify: false,
+  scrapedProducts: [],
+  selectedProducts: [], // scraped products chosen for translation
 };
 
 // ── Shopify Template Detection ─────────────────────────────
@@ -309,6 +311,7 @@ function showProductSelect(products) {
 
   continueWithSelected.onclick = () => {
     const selectedProducts = products.filter((_, i) => selected.has(i));
+    state.selectedProducts = selectedProducts;  // keep for direct Shopify import
     const csvText = productsToCSV(selectedProducts);
     state.fileName = `${shopifyImportUrl.value.trim().replace(/https?:\/\//, '')}-productos.csv`;
     parseCSV(csvText);
@@ -1122,6 +1125,10 @@ function showResult(totalCells, successCount, failedCount, skippedRows) {
 
   buildResultTable(resultTable, state.translatedRows, false);
   buildResultTable(comparisonTable, state.translatedRows, true);
+
+  // Show Shopify direct import panel only when coming from scraper flow
+  const panel = $('shopifyImportPanel');
+  if (panel) panel.style.display = state.selectedProducts.length > 0 ? '' : 'none';
 }
 
 function buildResultTable(tableEl, rows, comparison) {
@@ -1394,3 +1401,190 @@ function formatBytes(bytes) {
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
+
+// ── Shopify Direct Import ───────────────────────────────────
+(function () {
+  const storeInput  = $('shopifyDestStore');
+  const tokenInput  = $('shopifyDestToken');
+  const toggleBtn   = $('shopifyTokenToggle');
+  const testBtn     = $('shopifyTestConn');
+  const connStatus  = $('shopifyConnStatus');
+  const importBtn   = $('shopifyDirectImport');
+  const importLog   = $('shopifyImportLog');
+
+  if (!storeInput) return; // guard if elements not present
+
+  // Restore saved credentials
+  storeInput.value = localStorage.getItem('shp_store') || '';
+  tokenInput.value = localStorage.getItem('shp_token') || '';
+
+  toggleBtn.onclick = () => {
+    tokenInput.type = tokenInput.type === 'password' ? 'text' : 'password';
+  };
+
+  function getCredentials() {
+    const store = storeInput.value.trim().replace(/https?:\/\//, '').replace(/\/$/, '');
+    const token = tokenInput.value.trim();
+    return { store, token };
+  }
+
+  testBtn.onclick = async () => {
+    const { store, token } = getCredentials();
+    if (!store || !token) { showConnStatus('Introduce la tienda y el token.', 'warn'); return; }
+    testBtn.disabled = true;
+    showConnStatus('Verificando conexión...', 'info');
+    try {
+      const res = await fetch('/api/shopify/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ store, token }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showConnStatus(`✅ Conectado: ${data.shop.name} (${data.shop.domain})`, 'ok');
+        importBtn.disabled = false;
+        localStorage.setItem('shp_store', store);
+        localStorage.setItem('shp_token', token);
+      } else {
+        showConnStatus(`❌ ${data.error}`, 'error');
+        importBtn.disabled = true;
+      }
+    } catch (e) {
+      showConnStatus(`❌ Error de red: ${e.message}`, 'error');
+    }
+    testBtn.disabled = false;
+  };
+
+  importBtn.onclick = async () => {
+    if (!state.selectedProducts.length) return;
+    const { store, token } = getCredentials();
+    importBtn.disabled = true;
+    importLog.style.display = '';
+    importLog.innerHTML = '';
+
+    const products = state.selectedProducts;
+    let ok = 0, fail = 0;
+
+    for (let i = 0; i < products.length; i++) {
+      const orig = products[i];
+      const payload = buildShopifyPayload(orig);
+      const logItem = addLogItem(`⏳ (${i+1}/${products.length}) ${orig.title}...`);
+
+      try {
+        const res = await fetch('/api/shopify/products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ store, token, product: payload }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          logItem.textContent = `✅ (${i+1}/${products.length}) ${orig.title} — ${data.product.variants_count} variante(s)`;
+          logItem.style.color = '#4ade80';
+          ok++;
+        } else {
+          logItem.textContent = `❌ (${i+1}/${products.length}) ${orig.title}: ${JSON.stringify(data.error)}`;
+          logItem.style.color = '#f87171';
+          fail++;
+        }
+      } catch (e) {
+        logItem.textContent = `❌ (${i+1}/${products.length}) ${orig.title}: ${e.message}`;
+        logItem.style.color = '#f87171';
+        fail++;
+      }
+
+      // Small delay to respect Shopify rate limits (2 req/s)
+      await new Promise(r => setTimeout(r, 600));
+    }
+
+    const summary = document.createElement('p');
+    summary.style.cssText = 'margin:12px 0 0;font-weight:600;';
+    summary.textContent = `Listo: ${ok} importados, ${fail} errores.`;
+    importLog.appendChild(summary);
+    importBtn.disabled = false;
+  };
+
+  function buildShopifyPayload(orig) {
+    // Get translated text from state.translatedRows by matching Handle
+    const handleIdx = state.headers.indexOf('Handle');
+    const titleIdx  = state.headers.indexOf('Title');
+    const bodyIdx   = state.headers.indexOf('Body (HTML)');
+    const tagsIdx   = state.headers.indexOf('Tags');
+    const opt1NameIdx = state.headers.indexOf('Option1 Name');
+    const opt2NameIdx = state.headers.indexOf('Option2 Name');
+    const opt3NameIdx = state.headers.indexOf('Option3 Name');
+
+    const productRows = state.translatedRows.filter(r => (r[handleIdx] || '') === orig.handle);
+    const firstRow = productRows.find(r => (r[titleIdx] || '').trim()) || productRows[0] || [];
+
+    const title    = (firstRow[titleIdx] || orig.title || '').trim();
+    const body_html = (firstRow[bodyIdx] || orig.body_html || '').trim();
+    const tags     = (tagsIdx >= 0 ? firstRow[tagsIdx] : '') || (Array.isArray(orig.tags) ? orig.tags.join(', ') : orig.tags) || '';
+
+    // Option names (possibly translated)
+    const opt1Name = (opt1NameIdx >= 0 ? firstRow[opt1NameIdx] : '') || (orig.options?.[0]?.name || '');
+    const opt2Name = (opt2NameIdx >= 0 ? firstRow[opt2NameIdx] : '') || (orig.options?.[1]?.name || '');
+    const opt3Name = (opt3NameIdx >= 0 ? firstRow[opt3NameIdx] : '') || (orig.options?.[2]?.name || '');
+
+    // Build options from original
+    const options = (orig.options || []).map((opt, idx) => ({
+      name: [opt1Name, opt2Name, opt3Name][idx] || opt.name,
+      values: opt.values,
+    }));
+
+    // Build variants from original (keep prices, SKUs, stock)
+    // Include _variant_image_src so backend can link variant images
+    const variants = (orig.variants || []).map(v => {
+      const vObj = {
+        option1: v.option1 || '',
+        price: v.price || '0',
+        sku: v.sku || '',
+        grams: v.grams || 0,
+        inventory_management: v.inventory_management || 'shopify',
+        inventory_policy: v.inventory_policy || 'deny',
+        fulfillment_service: v.fulfillment_service || 'manual',
+        taxable: v.taxable !== false,
+        requires_shipping: v.requires_shipping !== false,
+        barcode: v.barcode || '',
+        _variant_image_src: v.featured_image ? v.featured_image.src : '',
+      };
+      if (v.compare_at_price) vObj.compare_at_price = v.compare_at_price;
+      if (v.option2) vObj.option2 = v.option2;
+      if (v.option3) vObj.option3 = v.option3;
+      if (v.weight_unit) vObj.weight_unit = v.weight_unit;
+      return vObj;
+    });
+
+    // All product images
+    const images = (orig.images || []).map(img => ({
+      src: img.src,
+      alt: img.alt || '',
+    }));
+
+    return {
+      title,
+      body_html,
+      vendor: orig.vendor || '',
+      product_type: orig.product_type || '',
+      tags,
+      status: 'active',
+      options: options.length ? options : undefined,
+      variants,
+      images,
+    };
+  }
+
+  function showConnStatus(msg, type) {
+    connStatus.textContent = msg;
+    connStatus.style.display = '';
+    connStatus.style.color = type === 'ok' ? '#4ade80' : type === 'error' ? '#f87171' : type === 'warn' ? '#fbbf24' : 'rgba(255,255,255,0.6)';
+  }
+
+  function addLogItem(text) {
+    const p = document.createElement('p');
+    p.style.cssText = 'margin:4px 0;';
+    p.textContent = text;
+    importLog.appendChild(p);
+    importLog.scrollTop = importLog.scrollHeight;
+    return p;
+  }
+})();

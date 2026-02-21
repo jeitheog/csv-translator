@@ -1787,3 +1787,20 @@ body {
   font-weight: 600;
   margin-top: 4px;
 }
+
+/* Shopify direct import panel */
+.shopify-creds-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.shopify-creds-row .select {
+  flex: 1;
+  min-width: 160px;
+}
+
+.shopify-import-panel {
+  margin-top: 8px;
+}
