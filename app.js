@@ -336,10 +336,20 @@ function productsToCSV(products) {
     const options = p.options || [];
     const images = p.images || [];
     const tags = Array.isArray(p.tags) ? p.tags.join(', ') : (p.tags || '');
-    const firstImg = images[0] || {};
+
+    // Build a set of image srcs claimed by variant featured_images
+    const variantImageSrcs = new Set(
+      variants.map(v => v.featured_image && v.featured_image.src).filter(Boolean)
+    );
 
     variants.forEach((v, i) => {
       const isFirst = i === 0;
+
+      // Use variant's featured_image if available; first product image for first row fallback
+      const vImg = v.featured_image
+        ? { src: v.featured_image.src || '', alt: v.featured_image.alt || '' }
+        : (isFirst && images[0] ? { src: images[0].src || '', alt: images[0].alt || '' } : { src: '', alt: '' });
+
       rows.push([
         p.handle,
         isFirst ? p.title : '',
@@ -365,8 +375,8 @@ function productsToCSV(products) {
         v.requires_shipping ?? '',
         v.taxable ?? '',
         v.barcode || '',
-        isFirst ? (firstImg.src || '') : '',
-        isFirst ? (firstImg.alt || '') : '',
+        vImg.src,
+        vImg.alt,
         'false',
         isFirst ? (p.title || '') : '',
         '',
@@ -374,8 +384,12 @@ function productsToCSV(products) {
       ].map(escapeCell).join(','));
     });
 
-    // Add one image-only row per extra image (Shopify CSV format for multiple images)
-    for (const img of images.slice(1)) {
+    // Image-only rows for product images not claimed by any variant
+    const productImages = variantImageSrcs.size > 0
+      ? images.filter(img => img.src && !variantImageSrcs.has(img.src))
+      : images.slice(1); // no variant images → skip first (already on first variant row)
+
+    for (const img of productImages) {
       if (!img.src) continue;
       rows.push(headers.map(h => {
         if (h === 'Handle') return escapeCell(p.handle);
