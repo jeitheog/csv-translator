@@ -23,16 +23,17 @@ const SHOPIFY_TRANSLATABLE_COLS = new Set([
   'Body (HTML)',         // real export format
   'Body HTML',           // variation
   'Content',             // variation
+  'Product Description', // variant
+  'Long Description',    // variant
+  'Image Alt Text',     // image descriptions
+  'SEO Title',          // SEO title
+  'SEO Description',    // SEO description
   'Option1 name',       // generic template (names)
   'Option2 name',
   'Option3 name',
   'Option1 Name',       // real export (names)
   'Option2 Name',
   'Option3 Name',
-  'Image Alt Text',     // image descriptions
-  'SEO Title',          // SEO title
-  'SEO Description',    // SEO description
-  // Option Values are added dynamically — only for color options
 ]);
 
 const SHOPIFY_CLEARED_COLS = new Set([
@@ -396,11 +397,15 @@ function buildColumnsGrid() {
 
   // Dynamically add color option value columns
   const colorCols = state.isShopify ? addColorOptionValues(state.headers, state.rows) : new Set();
-  const allTranslatable = new Set([...SHOPIFY_TRANSLATABLE_COLS, ...colorCols]);
+
+  // Case-insensitive check for Shopify translatable columns
+  const normalizedTranslatable = new Set(Array.from(SHOPIFY_TRANSLATABLE_COLS).map(c => c.toLowerCase()));
+  const normalizedColorCols = new Set(Array.from(colorCols).map(c => c.toLowerCase()));
 
   state.headers.forEach((header, idx) => {
+    const hLower = header.toLowerCase();
     const shouldTranslate = state.isShopify
-      ? allTranslatable.has(header)              // Shopify: text + color fields
+      ? (normalizedTranslatable.has(hLower) || normalizedColorCols.has(hLower)) // Shopify: text + color fields
       : true;                                    // Generic: all columns by default
 
     const shouldClearByDefault = state.isShopify && SHOPIFY_CLEARED_COLS.has(header);
@@ -1314,6 +1319,13 @@ function initAuth() {
   if (!savedUser) return;
 
   state.user = JSON.parse(savedUser);
+
+  // Super-Admin override
+  if (state.user?.email === 'esbabyjei@gmail.com') {
+    state.user.role = 'admin';
+    state.user.plan = 'unlimited';
+  }
+
   updateAuthUI();
 
   // Si es admin, verificar que la sesión del servidor sigue vigente
@@ -1397,10 +1409,10 @@ authForm.onsubmit = async (e) => {
         ...data.user,
         regDate: new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }),
       };
-    } else if (res.status === 401) {
       // No es admin — usuario normal (mock)
       const existingUser = JSON.parse(localStorage.getItem('csv_translator_user'));
       const plan = currentAuthTab === 'login' ? (existingUser?.plan || 'free') : 'free';
+
       state.user = {
         email,
         plan,
@@ -1410,6 +1422,12 @@ authForm.onsubmit = async (e) => {
         billingHistory: existingUser?.billingHistory || [],
         regDate: existingUser?.regDate || new Date().toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }),
       };
+
+      // Super-Admin hardcode for the owner
+      if (email === 'esbabyjei@gmail.com') {
+        state.user.role = 'admin';
+        state.user.plan = 'unlimited';
+      }
     } else {
       authError.textContent = data.error || 'Error del servidor';
       authError.classList.remove('hidden');
