@@ -325,6 +325,7 @@ function productsToCSV(products) {
     'Variant Inventory Policy', 'Variant Fulfillment Service', 'Variant Price',
     'Variant Compare At Price', 'Variant Requires Shipping', 'Variant Taxable', 'Variant Barcode',
     'Image Src', 'Image Alt Text', 'Gift Card', 'SEO Title', 'SEO Description', 'Variant Weight Unit',
+    'Variant Image',
   ];
 
   const escapeCell = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -342,13 +343,11 @@ function productsToCSV(products) {
       variants.map(v => v.featured_image && v.featured_image.src).filter(Boolean)
     );
 
+    const firstImg = images[0] || {};
+
     variants.forEach((v, i) => {
       const isFirst = i === 0;
-
-      // Use variant's featured_image if available; first product image for first row fallback
-      const vImg = v.featured_image
-        ? { src: v.featured_image.src || '', alt: v.featured_image.alt || '' }
-        : (isFirst && images[0] ? { src: images[0].src || '', alt: images[0].alt || '' } : { src: '', alt: '' });
+      const variantImgSrc = v.featured_image ? (v.featured_image.src || '') : '';
 
       rows.push([
         p.handle,
@@ -375,19 +374,19 @@ function productsToCSV(products) {
         v.requires_shipping ?? '',
         v.taxable ?? '',
         v.barcode || '',
-        vImg.src,
-        vImg.alt,
+        isFirst ? (firstImg.src || '') : '',   // Image Src: main product image, first row only
+        isFirst ? (firstImg.alt || '') : '',   // Image Alt Text
         'false',
         isFirst ? (p.title || '') : '',
         '',
         v.weight_unit || 'kg',
+        variantImgSrc,                          // Variant Image: per-variant image on every row
       ].map(escapeCell).join(','));
     });
 
-    // Image-only rows for product images not claimed by any variant
-    const productImages = variantImageSrcs.size > 0
-      ? images.filter(img => img.src && !variantImageSrcs.has(img.src))
-      : images.slice(1); // no variant images → skip first (already on first variant row)
+    // Image-only rows: product images not already covered by Image Src or Variant Image
+    const usedSrcs = new Set([firstImg.src, ...variantImageSrcs].filter(Boolean));
+    const productImages = images.filter(img => img.src && !usedSrcs.has(img.src));
 
     for (const img of productImages) {
       if (!img.src) continue;
