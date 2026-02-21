@@ -17,15 +17,17 @@ def _strip_html(html):
     return re.sub(r'\s+', ' ', text).strip()
 
 
-def _call_gemini(title, original_title, description, vendor):
+def _call_gemini(title, original_title, description, vendor, handle=None):
     plain = _strip_html(description)[:800]
     brand_hint = f' La marca es "{vendor}".' if vendor else ''
 
-    # Build the context block: original title gives the most reliable product clue
+    # Build the context block: original title and handle give the most reliable product clues
     context_parts = []
-    if original_title and original_title != title:
+    if handle:
+        context_parts.append(f'Handle del producto: {handle}')
+    if original_title:
         context_parts.append(f'Título original (idioma fuente): {original_title}')
-    if title:
+    if title and title != original_title:
         context_parts.append(f'Título traducido al español: {title}')
     if plain:
         context_parts.append(f'Descripción: {plain}')
@@ -34,23 +36,23 @@ def _call_gemini(title, original_title, description, vendor):
     prompt = (
         'Eres un experto en copywriting para tiendas premium de moda y decoración.'
         f'{brand_hint}\n\n'
-        'Analiza la siguiente información del producto e identifica QUÉ ES exactamente el artículo '
-        '(sofá, silla, bolso, zapatillas, chaqueta, etc.). '
-        'Usa TODOS los datos disponibles: el título original en el idioma fuente suele ser el más fiable.\n\n'
+        'TU MISIÓN: Identificar qué es exactamente el producto basándote en los DATOS ORIGINALES '
+        '(título original y descripción) para generar un nuevo título elegante.\n\n'
+        'PASOS:\n'
+        '1. Analiza el "Título original" y la "Descripción" (en su idioma fuente) para identificar el tipo de producto. '
+        'El handle también da pistas cruciales.\n'
+        '2. Determina el NOMBRE DEL PRODUCTO en español (ej: "Zapatillas", "Sofá", "Vestido", "Bolso"). '
+        'Debe ser el nombre genérico más exacto. Si son unas zapatillas, USA "Zapatillas".\n'
+        '3. Extrae la característica más llamativa o el estilo (ej: "Cuero Genuino", "Estilo Nórdico").\n\n'
         f'{context}\n\n'
-        'Devuelve ÚNICAMENTE un objeto JSON con estos dos campos:\n\n'
-        '- "tag": SOLO el tipo de artículo en español, máximo 3 palabras, '
-        'sin adjetivos, colores ni materiales. '
-        'Ejemplos: "Sofá", "Silla", "Mesa de comedor", "Bolso", "Zapatillas", '
-        '"Chaqueta", "Camiseta", "Armario", "Lámpara", "Alfombra", "Cómoda".\n\n'
-        '- "title": formato EXACTO → "[tag] - [característica más llamativa]"\n'
-        '  El primer elemento es exactamente el mismo valor que "tag".\n'
-        '  La característica: material, estilo o detalle único, máximo 5 palabras, sin nombre de marca.\n'
-        '  Ejemplos:\n'
-        '  {"tag":"Sofá","title":"Sofá - Chester de Terciopelo Azul Marino"}\n'
-        '  {"tag":"Zapatillas","title":"Zapatillas - Running de Cuero Premium"}\n'
-        '  {"tag":"Bolso","title":"Bolso - Piel Genuina Camel con Cadena"}\n\n'
-        'Responde ÚNICAMENTE con el JSON, sin markdown ni explicación:'
+        'REGLAS DE RESPUESTA (JSON ÚNICAMENTE):\n'
+        '- "tag": El tipo de artículo en español (ej: "Reloj", "Chaqueta"), máximo 2-3 palabras.\n'
+        '- "title": FORMATO EXACTO → "[tag] - [característica llamativa]"\n'
+        'Ejemplos correctos:\n'
+        '{"tag":"Zapatillas","title":"Zapatillas - Urban Style de Cuero Blanco"}\n'
+        '{"tag":"Sofá","title":"Sofá - Terciopelo Azul con Patas de Roble"}\n'
+        '{"tag":"Vestido","title":"Vestido - Seda con Estampado Floral"}\n\n'
+        'IMPORTANTE: Responde ÚNICAMENTE con el objeto JSON. Sin markdown, sin explicaciones.'
     )
 
     body = json.dumps({
@@ -96,13 +98,14 @@ class handler(BaseHTTPRequestHandler):
         original_title = (body.get('original_title') or '').strip()
         body_html      = (body.get('body_html')      or '').strip()
         vendor         = (body.get('vendor')         or '').strip()
+        handle         = (body.get('handle')         or '').strip()
 
-        if not title and not original_title and not body_html:
-            self._respond(400, {'error': 'Falta title, original_title o body_html'})
+        if not title and not original_title and not body_html and not handle:
+            self._respond(400, {'error': 'Falta title, original_title, handle o body_html'})
             return
 
         try:
-            tag, new_title = _call_gemini(title, original_title, body_html, vendor)
+            tag, new_title = _call_gemini(title, original_title, body_html, vendor, handle)
             self._respond(200, {'tag': tag, 'title': new_title})
         except urllib.error.HTTPError as e:
             err = e.read().decode() if e.fp else str(e)

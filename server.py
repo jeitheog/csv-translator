@@ -104,6 +104,8 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_shopify_create_product()
         elif self.path == "/api/translate":
             self._handle_translate()
+        elif self.path == "/api/tag":
+            self._handle_tag()
         elif self.path == "/api/scraper":
             self._handle_scraper()
         else:
@@ -385,6 +387,94 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
             self._send_json_response(502, {"error": f"No se pudo conectar: {str(e)}"})
             return
         self._send_json_response(200, {"products": all_products, "total": len(all_products)})
+
+    # ─── AI Tag/Enrichment proxy ─────────────────────────────
+    def _handle_tag(self):
+        gemini_api_key = os.environ.get('GEMINI_API_KEY', '')
+        if not gemini_api_key:
+            self._send_json_response(500, {'error': 'GEMINI_API_KEY no configurada'})
+            return
+
+        length = int(self.headers.get('Content-Length', 0))
+        body = json.loads(self.rfile.read(length)) if length else {}
+
+        title          = (body.get('title')          or '').strip()
+        original_title = (body.get('original_title') or '').strip()
+        body_html      = (body.get('body_html')      or '').strip()
+        vendor         = (body.get('vendor')         or '').strip()
+        handle         = (body.get('handle')         or '').strip()
+
+        if not title and not original_title and not body_html and not handle:
+            self._send_json_response(400, {'error': 'Falta title, original_title, handle o body_html'})
+            return
+
+        def _strip_html(html):
+            if not html: return ''
+            import re
+            text = re.sub(r'<[^>]+>', ' ', html)
+            return re.sub(r'\s+', ' ', text).strip()
+
+        plain = _strip_html(body_html)[:800]
+        brand_hint = f' La marca es "{vendor}".' if vendor else ''
+
+        context_parts = []
+        if handle: context_parts.append(f'Handle del producto: {handle}')
+        if original_title: context_parts.append(f'Título original (idioma fuente): {original_title}')
+        if title and title != original_title: context_parts.append(f'Título traducido al español: {title}')
+        if plain: context_parts.append(f'Descripción: {plain}')
+        context = '\n'.join(context_parts)
+
+        prompt = (
+            'Eres un experto en copywriting para tiendas premium de moda y decoración.'
+            f'{brand_hint}\n\n'
+            'TU MISIÓN: Identificar qué es exactamente el producto basándote en los DATOS ORIGINALES '
+            '(título original y descripción) para generar un nuevo título elegante.\n\n'
+            'PASOS:\n'
+            '1. Analiza el "Título original" y la "Descripción" (en su idioma fuente) para identificar el tipo de producto. '
+            'El handle también da pistas cruciales.\n'
+            '2. Determina el NOMBRE DEL PRODUCTO en español (ej: "Zapatillas", "Sofá", "Vestido", "Bolso"). '
+            'Debe ser el nombre genérico más exacto. Si son unas zapatillas, USA "Zapatillas".\n'
+            '3. Extrae la característica más llamativa o el estilo (ej: "Cuero Genuino", "Estilo Nórdico").\n\n'
+            f'{context}\n\n'
+            'REGLAS DE RESPUESTA (JSON ÚNICAMENTE):\n'
+            '- "tag": El tipo de artículo en español (ej: "Reloj", "Chaqueta"), máximo 2-3 palabras.\n'
+            '- "title": FORMATO EXACTO → "[tag] - [característica llamativa]"\n'
+            'Ejemplos correctos:\n'
+            '{"tag":"Zapatillas","title":"Zapatillas - Urban Style de Cuero Blanco"}\n'
+            '{"tag":"Sofá","title":"Sofá - Terciopelo Azul con Patas de Roble"}\n'
+            '{"tag":"Vestido","title":"Vestido - Seda con Estampado Floral"}\n\n'
+            'IMPORTANTE: Responde ÚNICAMENTE con el objeto JSON. Sin markdown, sin explicaciones.'
+        )
+
+        gemini_url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_api_key}'
+        gemini_body = json.dumps({
+            'contents': [{'parts': [{'text': prompt}]}],
+            'generationConfig': {'maxOutputTokens': 150, 'temperature': 0.1},
+        }).encode()
+
+        try:
+            req = urllib.request.Request(
+                gemini_url, data=gemini_body,
+                headers={'Content-Type': 'application/json'},
+                method='POST',
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode())
+
+            raw = data['candidates'][0]['content']['parts'][0]['text'].strip()
+            import re
+            raw = re.sub(r'^```[a-z]*\n?', '', raw).rstrip('`').strip()
+
+            parsed = json.loads(raw)
+            title_out = str(parsed.get('title', '')).strip('.,;:!?\'" ')[:120]
+            tag = str(parsed.get('tag', '')).strip('.,;:!?\'" ')[:60]
+
+            if title_out and ' - ' in title_out:
+                tag = title_out.split(' - ')[0].strip()
+
+            self._send_json_response(200, {'tag': tag, 'title': title_out})
+        except Exception as e:
+            self._send_json_response(500, {'error': str(e)})
 
     # ─── Suppress default logging clutter ───────────────────
     def log_message(self, format, *args):
