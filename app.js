@@ -1597,7 +1597,7 @@ function formatBytes(bytes) {
     return {
       title,
       body_html,
-      vendor: orig.vendor || '',
+      vendor: brandNameInput.value.trim() || orig.vendor || '',
       product_type: '',
       tags: '',
       status: 'active',
