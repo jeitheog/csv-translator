@@ -334,11 +334,12 @@ function productsToCSV(products) {
   for (const p of products) {
     const variants = p.variants || [];
     const options = p.options || [];
+    const images = p.images || [];
     const tags = Array.isArray(p.tags) ? p.tags.join(', ') : (p.tags || '');
+    const firstImg = images[0] || {};
 
     variants.forEach((v, i) => {
       const isFirst = i === 0;
-      const img = p.images && p.images[i] ? p.images[i] : (p.images && p.images[0] ? p.images[0] : {});
       rows.push([
         p.handle,
         isFirst ? p.title : '',
@@ -364,14 +365,25 @@ function productsToCSV(products) {
         v.requires_shipping ?? '',
         v.taxable ?? '',
         v.barcode || '',
-        isFirst ? (img.src || '') : '',
-        isFirst ? (img.alt || '') : '',
+        isFirst ? (firstImg.src || '') : '',
+        isFirst ? (firstImg.alt || '') : '',
         'false',
         isFirst ? (p.title || '') : '',
         '',
         v.weight_unit || 'kg',
       ].map(escapeCell).join(','));
     });
+
+    // Add one image-only row per extra image (Shopify CSV format for multiple images)
+    for (const img of images.slice(1)) {
+      if (!img.src) continue;
+      rows.push(headers.map(h => {
+        if (h === 'Handle') return escapeCell(p.handle);
+        if (h === 'Image Src') return escapeCell(img.src);
+        if (h === 'Image Alt Text') return escapeCell(img.alt || '');
+        return '""';
+      }).join(','));
+    }
   }
 
   return rows.join('\n');
