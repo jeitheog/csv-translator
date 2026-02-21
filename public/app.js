@@ -1488,7 +1488,7 @@ function formatBytes(bytes) {
         const tagRes = await fetch('/api/tag', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: payload.title, body_html: payload.body_html, vendor: payload.vendor }),
+          body: JSON.stringify({ title: payload.title, original_title: orig.title, body_html: payload.body_html, vendor: payload.vendor }),
         });
         if (tagRes.ok) {
           const { tag, title: aiTitle } = await tagRes.json();
