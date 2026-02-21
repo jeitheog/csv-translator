@@ -1223,9 +1223,23 @@ function buildCSVContent() {
     ? state.headers.indexOf('Option2 Name')
     : state.headers.indexOf('Option2 name');
 
+  // Shopify requires these exact values — enforce them on every row
+  const invPolicyIdx = state.headers.indexOf('Variant Inventory Policy');
+  const fulfillIdx   = state.headers.indexOf('Variant Fulfillment Service');
+
+  const VALID_INV_POLICIES = new Set(['deny', 'continue']);
+
   const rows = state.translatedRows.map(row => {
     const r = [...row];
     if (vendorIdx >= 0) r[vendorIdx] = brandNameInput.value || 'Rovelli Maison';
+
+    // Ensure Shopify-required fields always have valid values
+    if (invPolicyIdx >= 0 && !VALID_INV_POLICIES.has((r[invPolicyIdx] || '').trim().toLowerCase())) {
+      r[invPolicyIdx] = 'deny';
+    }
+    if (fulfillIdx >= 0 && !(r[fulfillIdx] || '').trim()) {
+      r[fulfillIdx] = 'manual';
+    }
 
     // Clear metadata columns if they are not selected
     state.headers.forEach((h, i) => {
