@@ -17,22 +17,28 @@ def _strip_html(html):
     return re.sub(r'\s+', ' ', text).strip()
 
 
-def _call_gemini(title, description):
-    plain = _strip_html(description)[:600]
+def _call_gemini(title, description, vendor):
+    plain = _strip_html(description)[:800]
+    brand_hint = f' La marca es "{vendor}".' if vendor else ''
     prompt = (
-        'Analiza este producto y devuelve ÚNICAMENTE el tipo de artículo '
-        'en español como una sola palabra o frase muy corta (máximo 3 palabras). '
-        'Ejemplos válidos: Sofá, Silla, Mesa de comedor, Cama, Armario, '
-        'Lámpara, Alfombra, Estantería, Espejo, Cómoda, Sillón, Taburete.\n'
-        'NO incluyas adjetivos, colores ni materiales. SOLO el tipo de artículo.\n\n'
-        f'Título: {title}\n'
+        'Eres un experto en copywriting para tiendas de decoración y muebles de lujo.'
+        f'{brand_hint}\n\n'
+        'Analiza el siguiente producto y devuelve ÚNICAMENTE un objeto JSON válido con estos dos campos:\n'
+        '- "tag": tipo de artículo en español, una palabra o frase muy corta (máximo 3 palabras), '
+        'sin adjetivos ni colores. Ejemplos: "Sofá", "Mesa de comedor", "Silla", "Armario", '
+        '"Lámpara", "Alfombra", "Estantería", "Espejo", "Cómoda", "Sillón".\n'
+        '- "title": título de producto elegante en español, enfoque premium de marca, '
+        'máximo 8 palabras, destaca el material o característica más distintiva, '
+        'sin incluir el nombre de la marca.\n\n'
+        f'Título original: {title}\n'
         f'Descripción: {plain}\n\n'
-        'Responde ÚNICAMENTE con el tipo de artículo, sin puntuación ni explicación:'
+        'Responde ÚNICAMENTE con el JSON, sin markdown ni explicación. Ejemplo:\n'
+        '{"tag":"Sofá","title":"Sofá Chester de Terciopelo Azul Marino"}'
     )
 
     body = json.dumps({
         'contents': [{'parts': [{'text': prompt}]}],
-        'generationConfig': {'maxOutputTokens': 20, 'temperature': 0},
+        'generationConfig': {'maxOutputTokens': 80, 'temperature': 0.2},
     }).encode()
 
     req = urllib.request.Request(
@@ -40,12 +46,18 @@ def _call_gemini(title, description):
         headers={'Content-Type': 'application/json'},
         method='POST',
     )
-    with urllib.request.urlopen(req, timeout=10) as resp:
+    with urllib.request.urlopen(req, timeout=15) as resp:
         data = json.loads(resp.read().decode())
+
     raw = data['candidates'][0]['content']['parts'][0]['text'].strip()
-    # Capitalise and remove stray punctuation
-    tag = raw.strip('.,;:!?"\' ').strip()
-    return tag[:60] if tag else ''
+
+    # Strip markdown code fences if present
+    raw = re.sub(r'^```[a-z]*\n?', '', raw).rstrip('`').strip()
+
+    parsed = json.loads(raw)
+    tag   = str(parsed.get('tag', '')).strip('.,;:!?\'" ')[:60]
+    title_out = str(parsed.get('title', '')).strip('.,;:!?\'" ')[:120]
+    return tag, title_out
 
 
 class handler(BaseHTTPRequestHandler):
@@ -58,16 +70,17 @@ class handler(BaseHTTPRequestHandler):
         length = int(self.headers.get('Content-Length', 0))
         body = json.loads(self.rfile.read(length)) if length else {}
 
-        title = (body.get('title') or '').strip()
+        title    = (body.get('title')    or '').strip()
         body_html = (body.get('body_html') or '').strip()
+        vendor   = (body.get('vendor')   or '').strip()
 
         if not title and not body_html:
             self._respond(400, {'error': 'Falta title o body_html'})
             return
 
         try:
-            tag = _call_gemini(title, body_html)
-            self._respond(200, {'tag': tag})
+            tag, new_title = _call_gemini(title, body_html, vendor)
+            self._respond(200, {'tag': tag, 'title': new_title})
         except urllib.error.HTTPError as e:
             err = e.read().decode() if e.fp else str(e)
             self._respond(502, {'error': f'Gemini API error: {err[:300]}'})

@@ -1483,18 +1483,19 @@ function formatBytes(bytes) {
       const orig = products[i];
       const payload = buildShopifyPayload(orig);
 
-      // Generate AI tag via Gemini (best-effort, non-blocking)
+      // Generate AI tag + brand title via Gemini (best-effort, non-blocking)
       try {
         const tagRes = await fetch('/api/tag', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: payload.title, body_html: payload.body_html }),
+          body: JSON.stringify({ title: payload.title, body_html: payload.body_html, vendor: payload.vendor }),
         });
         if (tagRes.ok) {
-          const { tag } = await tagRes.json();
+          const { tag, title: aiTitle } = await tagRes.json();
           if (tag) payload.tags = tag;
+          if (aiTitle) payload.title = aiTitle;
         }
-      } catch (_) { /* ignore tag errors, continue with import */ }
+      } catch (_) { /* ignore AI errors, continue with import */ }
 
       const logItem = addLogItem(`⏳ (${i + 1}/${products.length}) ${orig.title}...`);
 
