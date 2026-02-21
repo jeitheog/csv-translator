@@ -1482,6 +1482,20 @@ function formatBytes(bytes) {
     for (let i = 0; i < products.length; i++) {
       const orig = products[i];
       const payload = buildShopifyPayload(orig);
+
+      // Generate AI tag via Gemini (best-effort, non-blocking)
+      try {
+        const tagRes = await fetch('/api/tag', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: payload.title, body_html: payload.body_html }),
+        });
+        if (tagRes.ok) {
+          const { tag } = await tagRes.json();
+          if (tag) payload.tags = tag;
+        }
+      } catch (_) { /* ignore tag errors, continue with import */ }
+
       const logItem = addLogItem(`⏳ (${i + 1}/${products.length}) ${orig.title}...`);
 
       try {
@@ -1516,38 +1530,6 @@ function formatBytes(bytes) {
     importLog.appendChild(summary);
     importBtn.disabled = false;
   };
-
-  // Spanish articles/prepositions to skip when extracting the main noun from a title
-  const SKIP_WORDS = new Set([
-    'el','la','los','las','un','una','unos','unas',
-    'de','del','en','con','para','por','a','al','y','o',
-    'su','sus','mi','tu','nos',
-  ]);
-
-  function generateProductTag(title, bodyHtml) {
-    // Use the translated title up to any dash/pipe separator
-    const cleanTitle = title.replace(/[-–—|\/].*$/, '').trim();
-
-    // Walk words and return the first meaningful noun (len > 2, not a skip word)
-    const words = cleanTitle.split(/\s+/);
-    for (const raw of words) {
-      const word = raw.replace(/[^a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]/g, '');
-      if (word.length > 2 && !SKIP_WORDS.has(word.toLowerCase())) {
-        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-      }
-    }
-
-    // Fallback: strip HTML from description and grab first noun there
-    const plain = bodyHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-    for (const raw of plain.split(/\s+/)) {
-      const word = raw.replace(/[^a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]/g, '');
-      if (word.length > 3 && !SKIP_WORDS.has(word.toLowerCase())) {
-        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-      }
-    }
-
-    return '';
-  }
 
   function buildShopifyPayload(orig) {
     // Get translated text from state.translatedRows by matching Handle
@@ -1626,14 +1608,12 @@ function formatBytes(bytes) {
       alt: img.alt || '',
     }));
 
-    const autoTag = generateProductTag(title, body_html);
-
     return {
       title,
       body_html,
       vendor: brandNameInput.value.trim() || orig.vendor || '',
       product_type: '',
-      tags: autoTag,
+      tags: '', // filled in by /api/tag (Gemini) in the import loop
       status: 'active',
       options: options.length ? options : undefined,
       variants,
