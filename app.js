@@ -1105,7 +1105,8 @@ function updateAuthUI() {
 
 function checkUsageLimits(uniqueProducts) {
   const plan = state.user?.plan || 'free';
-  if (plan === 'unlimited') {
+  const role = state.user?.role || '';
+  if (plan === 'unlimited' || role === 'admin') {
     translateBtn.disabled = false;
     authWarning.classList.add('hidden');
     return;
@@ -1205,7 +1206,7 @@ function updateDashboardUI() {
   dashFilesCount.textContent = state.user.filesProcessed || 0;
 
   // Show/Hide Upgrade/Cancel buttons based on plan
-  if (state.user.plan === 'unlimited') {
+  if (state.user.plan === 'unlimited' || state.user.role === 'admin') {
     dashUpgradeContainer.classList.add('hidden');
     dashUpgradeBtn.classList.add('hidden');
     cancelSubBtn.classList.add('hidden');
