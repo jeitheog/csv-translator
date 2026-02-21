@@ -1,11 +1,16 @@
 {
   "version": 2,
   "builds": [
-    { "src": "index.html",    "use": "@vercel/static" },
-    { "src": "style.css",     "use": "@vercel/static" },
-    { "src": "app.js",        "use": "@vercel/static" },
-    { "src": "api/*.py",      "use": "@vercel/python" },
-    { "src": "api/**/*.py",   "use": "@vercel/python" }
+    { "src": "index.html",              "use": "@vercel/static" },
+    { "src": "style.css",               "use": "@vercel/static" },
+    { "src": "app.js",                  "use": "@vercel/static" },
+    { "src": "api/translate.py",        "use": "@vercel/python" },
+    { "src": "api/scraper.py",          "use": "@vercel/python" },
+    { "src": "api/auth/login.py",       "use": "@vercel/python" },
+    { "src": "api/auth/logout.py",      "use": "@vercel/python" },
+    { "src": "api/auth/verify.py",      "use": "@vercel/python" },
+    { "src": "api/shopify/test.py",     "use": "@vercel/python" },
+    { "src": "api/shopify/products.py", "use": "@vercel/python" }
   ],
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/$1" },
