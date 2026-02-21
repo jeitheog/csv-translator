@@ -136,10 +136,6 @@ const authWarningText = $('authWarningText');
 const userPlanBadge = $('userPlanBadge');
 const upgradeBtns = document.querySelectorAll('.upgrade-btn');
 
-const translationEngine = $('translationEngine');
-const engineHint = $('engineHint');
-const claudeConfig = $('claudeConfig');
-const claudeKey = $('claudeKey');
 
 // ── Dashboard & Payment Refs ────────────────────────────────
 const miCuentaBtn = $('miCuentaBtn');
@@ -612,22 +608,6 @@ function enhanceTitle(translatedTitle) {
 }
 
 // ── Translation ────────────────────────────────────────────
-// ── Engine Selection ──────────────────────────────────────
-translationEngine.onchange = () => {
-  const isClaude = translationEngine.value === 'claude';
-  claudeConfig.classList.toggle('hidden', !isClaude);
-  engineHint.textContent = isClaude
-    ? 'Claude 3.5 Sonnet ofrece traducciones perfectas que respetan el HTML y el tono de tu marca.'
-    : 'Google es rápido pero Claude es mucho mejor con el código HTML y el sentido de las descripciones.';
-};
-
-// Auto-load Claude Key
-if (localStorage.getItem('claude_api_key')) {
-  claudeKey.value = localStorage.getItem('claude_api_key');
-}
-claudeKey.oninput = () => {
-  localStorage.setItem('claude_api_key', claudeKey.value.trim());
-};
 
 translateBtn.addEventListener('click', startTranslation);
 
@@ -897,11 +877,6 @@ async function translatePlainText(text, langPair, retries = 3) {
     return results.join('');
   }
 
-  const engine = translationEngine.value;
-  if (engine === 'claude') {
-    return translateClaude(text, langPair, retries);
-  }
-
   const [sl, tl] = langPair.split('|');
 
   for (let attempt = 0; attempt < retries; attempt++) {
@@ -947,47 +922,6 @@ async function translatePlainText(text, langPair, retries = 3) {
   return null; // all retries exhausted, signal failure
 }
 
-/**
- * Premium Translation using Claude 3.5 Sonnet via Vercel Proxy
- */
-async function translateClaude(text, langPair, retries = 2) {
-  const key = claudeKey.value.trim();
-  if (!key) {
-    alert('Por favor, introduce tu Anthropic API Key para usar Claude.');
-    translationEngine.value = 'google';
-    translationEngine.dispatchEvent(new Event('change'));
-    return null;
-  }
-
-  for (let attempt = 0; attempt < retries; attempt++) {
-    try {
-      const res = await fetch('/api/translate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': key
-        },
-        body: JSON.stringify({
-          text: text,
-          langPair: langPair,
-          model: 'claude-3-5-sonnet-20240620'
-        })
-      });
-
-      const data = await res.json();
-      if (res.ok && data.translated) {
-        return data.translated;
-      } else {
-        throw new Error(data.error || 'Error desconocido en Claude');
-      }
-    } catch (err) {
-      console.warn(`Claude attempt ${attempt + 1} failed:`, err);
-      logError('Claude Premium API', err.message);
-      if (attempt < retries - 1) await sleep(1500);
-    }
-  }
-  return null;
-}
 
 
 function updateProgress(done, total, message, successCount, failedCount) {
