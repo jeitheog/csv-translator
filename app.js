@@ -1509,33 +1509,56 @@ function formatBytes(bytes) {
     const titleIdx  = state.headers.indexOf('Title');
     const bodyIdx   = state.headers.indexOf('Body (HTML)');
     const tagsIdx   = state.headers.indexOf('Tags');
-    const opt1NameIdx = state.headers.indexOf('Option1 Name');
-    const opt2NameIdx = state.headers.indexOf('Option2 Name');
-    const opt3NameIdx = state.headers.indexOf('Option3 Name');
+    const opt1NameIdx  = state.headers.indexOf('Option1 Name');
+    const opt2NameIdx  = state.headers.indexOf('Option2 Name');
+    const opt3NameIdx  = state.headers.indexOf('Option3 Name');
+    const opt1ValIdx   = state.headers.indexOf('Option1 Value');
+    const opt2ValIdx   = state.headers.indexOf('Option2 Value');
+    const opt3ValIdx   = state.headers.indexOf('Option3 Value');
+    const priceColIdx  = state.headers.indexOf('Variant Price');
 
-    const productRows = state.translatedRows.filter(r => (r[handleIdx] || '') === orig.handle);
-    const firstRow = productRows.find(r => (r[titleIdx] || '').trim()) || productRows[0] || [];
+    const allProductRows = state.translatedRows.filter(r => (r[handleIdx] || '') === orig.handle);
+    // Variant rows are those with a non-empty Variant Price; image-only rows have empty price
+    const variantRows = allProductRows.filter(r => priceColIdx < 0 || (r[priceColIdx] || '').trim() !== '');
+    const firstRow = variantRows.find(r => (r[titleIdx] || '').trim()) || variantRows[0] || [];
 
-    const title    = (firstRow[titleIdx] || orig.title || '').trim();
-    const body_html = (firstRow[bodyIdx] || orig.body_html || '').trim();
-    const tags     = (tagsIdx >= 0 ? firstRow[tagsIdx] : '') || (Array.isArray(orig.tags) ? orig.tags.join(', ') : orig.tags) || '';
+    const title     = (firstRow[titleIdx] || orig.title || '').trim();
+    const body_html = (firstRow[bodyIdx]  || orig.body_html || '').trim();
+    const tags      = (tagsIdx >= 0 ? firstRow[tagsIdx] : '') || (Array.isArray(orig.tags) ? orig.tags.join(', ') : orig.tags) || '';
 
     // Option names (possibly translated)
     const opt1Name = (opt1NameIdx >= 0 ? firstRow[opt1NameIdx] : '') || (orig.options?.[0]?.name || '');
     const opt2Name = (opt2NameIdx >= 0 ? firstRow[opt2NameIdx] : '') || (orig.options?.[1]?.name || '');
     const opt3Name = (opt3NameIdx >= 0 ? firstRow[opt3NameIdx] : '') || (orig.options?.[2]?.name || '');
 
-    // Build options from original
-    const options = (orig.options || []).map((opt, idx) => ({
-      name: [opt1Name, opt2Name, opt3Name][idx] || opt.name,
-      values: opt.values,
-    }));
+    // Build options with translated values (deduplicated, preserving order)
+    const seen1 = new Set(), seen2 = new Set(), seen3 = new Set();
+    const vals1 = [], vals2 = [], vals3 = [];
+    variantRows.forEach(r => {
+      const v1 = opt1ValIdx >= 0 ? (r[opt1ValIdx] || '').trim() : '';
+      const v2 = opt2ValIdx >= 0 ? (r[opt2ValIdx] || '').trim() : '';
+      const v3 = opt3ValIdx >= 0 ? (r[opt3ValIdx] || '').trim() : '';
+      if (v1 && !seen1.has(v1)) { seen1.add(v1); vals1.push(v1); }
+      if (v2 && !seen2.has(v2)) { seen2.add(v2); vals2.push(v2); }
+      if (v3 && !seen3.has(v3)) { seen3.add(v3); vals3.push(v3); }
+    });
 
-    // Build variants from original (keep prices, SKUs, stock)
-    // Include _variant_image_src so backend can link variant images
-    const variants = (orig.variants || []).map(v => {
+    const options = (orig.options || []).map((opt, idx) => {
+      const name   = [opt1Name, opt2Name, opt3Name][idx] || opt.name;
+      const values = [vals1, vals2, vals3][idx];
+      return { name, values: values && values.length ? values : opt.values };
+    });
+
+    // Build variants with translated option values + original pricing/stock
+    // Include _variant_image_src so backend can link variant images after creation
+    const variants = (orig.variants || []).map((v, i) => {
+      const row = variantRows[i] || [];
+      const translOpt1 = opt1ValIdx >= 0 ? (row[opt1ValIdx] || '').trim() : '';
+      const translOpt2 = opt2ValIdx >= 0 ? (row[opt2ValIdx] || '').trim() : '';
+      const translOpt3 = opt3ValIdx >= 0 ? (row[opt3ValIdx] || '').trim() : '';
+
       const vObj = {
-        option1: v.option1 || '',
+        option1: translOpt1 || v.option1 || '',
         price: v.price || '0',
         sku: v.sku || '',
         grams: v.grams || 0,
@@ -1548,8 +1571,8 @@ function formatBytes(bytes) {
         _variant_image_src: v.featured_image ? v.featured_image.src : '',
       };
       if (v.compare_at_price) vObj.compare_at_price = v.compare_at_price;
-      if (v.option2) vObj.option2 = v.option2;
-      if (v.option3) vObj.option3 = v.option3;
+      if (translOpt2 || v.option2) vObj.option2 = translOpt2 || v.option2;
+      if (translOpt3 || v.option3) vObj.option3 = translOpt3 || v.option3;
       if (v.weight_unit) vObj.weight_unit = v.weight_unit;
       return vObj;
     });
