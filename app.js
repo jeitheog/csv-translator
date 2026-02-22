@@ -1494,16 +1494,21 @@ function formatBytes(bytes) {
       const lang = sourceLang.value;
       const langPair = lang === 'auto' ? 'auto|es' : `${lang}|es`;
 
-      // If these are scraped products (scrapedProducts.length > 0), they might need translation
-      // because buildShopifyPayload currently gets data from state.translatedRows (empty for scraped)
-      // OR directly from 'orig'. Let's ensure title/body are translated if not already.
-      if (!state.translatedRows.length || !state.headers.includes('Handle')) {
+      // If these are scraped products (scrapedProducts.length > 0)
+      // their titles MUST be translated here because they aren't in the CSV loop.
+      if (state.scrapedProducts.length > 0) {
         try {
-          const tTitle = await translateText(payload.title, langPair);
-          if (tTitle) payload.title = tTitle;
-          const tBody = await translateText(payload.body_html, langPair);
-          if (tBody) payload.body_html = tBody;
-        } catch (e) { console.warn('Direct translation failed:', e); }
+          if (payload.title) {
+            const tTitle = await translateText(payload.title, langPair);
+            if (tTitle) payload.title = tTitle;
+          }
+          if (payload.body_html) {
+            const tBody = await translateText(payload.body_html, langPair);
+            if (tBody) payload.body_html = tBody;
+          }
+        } catch (e) {
+          console.warn('Scraper title/body translation failed:', e);
+        }
       }
 
       // Generate AI tag + brand title via Gemini (best-effort, non-blocking)
