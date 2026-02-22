@@ -903,19 +903,8 @@ async function startTranslation() {
         state.translatedRows[rowIdx][colIdx] = originalText;
         failedCells.push({ idx: i + j, rowIdx, colIdx, originalText });
       } else {
-        // Success path — apply title enhancement if needed
-        let finalText = translated;
-        if (colIdx === titleIdx && finalText) {
-          const handle = handleIdx >= 0 ? state.rows[rowIdx][handleIdx] : rowIdx;
-          const bodyHtml = bodyIdx >= 0 ? state.rows[rowIdx][bodyIdx] : '';
-          const vendor = vendorIdx >= 0 ? state.rows[rowIdx][vendorIdx] : '';
-
-          if (!enhancedTitles[handle]) {
-            enhancedTitles[handle] = await enhanceTitle(finalText, originalText, handle, bodyHtml, vendor);
-          }
-          finalText = enhancedTitles[handle];
-        }
-        state.translatedRows[rowIdx][colIdx] = finalText;
+        // Success path
+        state.translatedRows[rowIdx][colIdx] = translated;
         successCount++;
       }
       done++;
@@ -942,19 +931,7 @@ async function startTranslation() {
 
       const didWork = retried !== null && retried !== cell.originalText;
       if (didWork) {
-        let finalText = retried;
-        // Apply title enhancement on retry too
-        if (cell.colIdx === titleIdx && finalText) {
-          const handle = handleIdx >= 0 ? state.rows[cell.rowIdx][handleIdx] : cell.rowIdx;
-          const bodyHtml = bodyIdx >= 0 ? state.rows[cell.rowIdx][bodyIdx] : '';
-          const vendor = vendorIdx >= 0 ? state.rows[cell.rowIdx][vendorIdx] : '';
-
-          if (!enhancedTitles[handle]) {
-            enhancedTitles[handle] = await enhanceTitle(finalText, cell.originalText, handle, bodyHtml, vendor);
-          }
-          finalText = enhancedTitles[handle];
-        }
-        state.translatedRows[cell.rowIdx][cell.colIdx] = finalText;
+        state.translatedRows[cell.rowIdx][cell.colIdx] = retried;
         successCount++;
         retryResults.push(true);
       } else {
@@ -1523,7 +1500,9 @@ function formatBytes(bytes) {
         });
         if (tagRes.ok) {
           const { tag, title: aiTitle } = await tagRes.json();
-          if (aiTitle) payload.title = aiTitle;
+          // Title enrichment is disabled per user request:
+          // if (aiTitle) payload.title = aiTitle;
+
           // Tag = product name: take from AI, or extract from title before ' - '
           if (tag) {
             payload.tags = tag;
