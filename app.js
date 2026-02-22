@@ -383,7 +383,7 @@ function productsToCSV(products) {
         v.grams || '',
         '',                                     // Force 'Inventory not tracked' (empty Tracker)
         '',                                     // No quantity for untracked items
-        v.inventory_policy || 'deny',
+        'continue',                             // Force 'Continue selling' (comprar indefinida)
         v.fulfillment_service || 'manual',
         v.price || '',
         v.compare_at_price || '',
@@ -1630,7 +1630,7 @@ function formatBytes(bytes) {
         sku: v.sku || '',
         grams: v.grams || 0,
         inventory_management: null,             // Force 'Inventory not tracked'
-        inventory_policy: v.inventory_policy || 'deny',
+        inventory_policy: 'continue',           // Force 'Continue selling' (comprar indefinida)
         fulfillment_service: v.fulfillment_service || 'manual',
         taxable: v.taxable !== false,
         requires_shipping: v.requires_shipping !== false,

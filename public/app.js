@@ -381,9 +381,9 @@ function productsToCSV(products) {
         v.option3 || '',
         v.sku || '',
         v.grams || '',
-        v.inventory_management || '',
-        v.inventory_quantity ?? '',
-        v.inventory_policy || 'deny',
+        '',                                     // Force 'Inventory not tracked' (empty Tracker)
+        '',                                     // No quantity for untracked items
+        'continue',                             // Force 'Continue selling' (comprar indefinida)
         v.fulfillment_service || 'manual',
         v.price || '',
         v.compare_at_price || '',
@@ -703,8 +703,29 @@ const SYNONYMS = {
 // ── AI-Style Brand Name Generator ──────────────────────────
 // Generates unique, premium-sounding brand names using syllable combinations
 
-function enhanceTitle(translatedTitle) {
-  // Detect what kind of product this is from the translated title
+async function enhanceTitle(translatedTitle, originalTitle, handle, bodyHtml, vendor) {
+  // 1. Try AI-powered enhancement via Gemini
+  try {
+    const res = await fetch('/api/tag', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: translatedTitle,
+        original_title: originalTitle,
+        handle: handle,
+        body_html: bodyHtml,
+        vendor: vendor
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.title) return data.title;
+    }
+  } catch (e) {
+    console.warn('AI Title Enhancement failed, falling back to heuristic.', e);
+  }
+
+  // 2. Fallback: Detect what kind of product this is from the translated title (Heuristic)
   const lower = translatedTitle.toLowerCase();
 
   // Detect garment type
@@ -766,12 +787,12 @@ function enhanceTitle(translatedTitle) {
   const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
   const style = STYLES[Math.floor(Math.random() * STYLES.length)];
 
-  // Name patterns (Removed Brand name as per user request)
+  // Name patterns (Enforce: [Tag] - [Catchy Detail])
   const PATTERNS = [
-    () => `${garment} ${adj} ${audience}`.trim(),
-    () => `${garment} ${style} ${audience}`.trim(),
-    () => `${garment} ${adj} · ${style}`,
-    () => `${adj} ${garment} ${audience}`.trim(),
+    () => `${garment} - ${adj} ${audience}`.trim(),
+    () => `${garment} - ${style} ${audience}`.trim(),
+    () => `${garment} - ${adj} · ${style}`,
+    () => `${garment} - ${style} ${adj}`,
   ];
 
   const pattern = PATTERNS[Math.floor(Math.random() * PATTERNS.length)];
@@ -837,8 +858,10 @@ async function startTranslation() {
   const BATCH_SIZE = 5;
   const DELAY_MS = 250;
 
-  // Find the Title column index for enhancement
+  // Find indices for enhancement context
   const titleIdx = state.headers.indexOf('Title');
+  const bodyIdx = state.headers.indexOf('Body (HTML)');
+  const vendorIdx = state.headers.indexOf('Vendor');
   const handleIdx = state.headers.indexOf('Handle') >= 0
     ? state.headers.indexOf('Handle')
     : state.headers.indexOf('URL handle');
@@ -862,7 +885,8 @@ async function startTranslation() {
       batch.map(text => translateText(text, langPair))
     );
 
-    translations.forEach((translated, j) => {
+    for (let j = 0; j < translations.length; j++) {
+      const translated = translations[j];
       const { rowIdx, colIdx } = batchCells[j];
       const originalText = batch[j];
 
@@ -880,18 +904,22 @@ async function startTranslation() {
         failedCells.push({ idx: i + j, rowIdx, colIdx, originalText });
       } else {
         // Success path — apply title enhancement if needed
-        if (colIdx === titleIdx && translated) {
+        let finalText = translated;
+        if (colIdx === titleIdx && finalText) {
           const handle = handleIdx >= 0 ? state.rows[rowIdx][handleIdx] : rowIdx;
+          const bodyHtml = bodyIdx >= 0 ? state.rows[rowIdx][bodyIdx] : '';
+          const vendor = vendorIdx >= 0 ? state.rows[rowIdx][vendorIdx] : '';
+
           if (!enhancedTitles[handle]) {
-            enhancedTitles[handle] = enhanceTitle(translated);
+            enhancedTitles[handle] = await enhanceTitle(finalText, originalText, handle, bodyHtml, vendor);
           }
-          translated = enhancedTitles[handle];
+          finalText = enhancedTitles[handle];
         }
-        state.translatedRows[rowIdx][colIdx] = translated;
+        state.translatedRows[rowIdx][colIdx] = finalText;
         successCount++;
       }
       done++;
-    });
+    }
 
     updateProgress(done, total, `Traduciendo celda ${done} de ${total}...`, successCount, failedCells.length);
 
@@ -918,8 +946,11 @@ async function startTranslation() {
         // Apply title enhancement on retry too
         if (cell.colIdx === titleIdx && finalText) {
           const handle = handleIdx >= 0 ? state.rows[cell.rowIdx][handleIdx] : cell.rowIdx;
+          const bodyHtml = bodyIdx >= 0 ? state.rows[cell.rowIdx][bodyIdx] : '';
+          const vendor = vendorIdx >= 0 ? state.rows[cell.rowIdx][vendorIdx] : '';
+
           if (!enhancedTitles[handle]) {
-            enhancedTitles[handle] = enhanceTitle(finalText);
+            enhancedTitles[handle] = await enhanceTitle(finalText, cell.originalText, handle, bodyHtml, vendor);
           }
           finalText = enhancedTitles[handle];
         }
@@ -1598,8 +1629,8 @@ function formatBytes(bytes) {
         price: v.price || '0',
         sku: v.sku || '',
         grams: v.grams || 0,
-        inventory_management: v.inventory_management || 'shopify',
-        inventory_policy: v.inventory_policy || 'deny',
+        inventory_management: null,             // Force 'Inventory not tracked'
+        inventory_policy: 'continue',           // Force 'Continue selling' (comprar indefinida)
         fulfillment_service: v.fulfillment_service || 'manual',
         taxable: v.taxable !== false,
         requires_shipping: v.requires_shipping !== false,
