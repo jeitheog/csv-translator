@@ -381,8 +381,8 @@ function productsToCSV(products) {
         v.option3 || '',
         v.sku || '',
         v.grams || '',
-        v.inventory_management || '',
-        v.inventory_quantity ?? '',
+        '',                                     // Force 'Inventory not tracked' (empty Tracker)
+        '',                                     // No quantity for untracked items
         v.inventory_policy || 'deny',
         v.fulfillment_service || 'manual',
         v.price || '',
@@ -1629,7 +1629,7 @@ function formatBytes(bytes) {
         price: v.price || '0',
         sku: v.sku || '',
         grams: v.grams || 0,
-        inventory_management: v.inventory_management || 'shopify',
+        inventory_management: null,             // Force 'Inventory not tracked'
         inventory_policy: v.inventory_policy || 'deny',
         fulfillment_service: v.fulfillment_service || 'manual',
         taxable: v.taxable !== false,
