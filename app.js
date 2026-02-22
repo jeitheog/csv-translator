@@ -872,7 +872,7 @@ async function startTranslation() {
     if (!text || text.trim() === '') return true;
     if (/^\d+([.,]\d+)?$/.test(text.trim())) return true;
     if (/^https?:\/\//i.test(text.trim())) return true;
-    if (/^[A-Z0-9_-]+$/i.test(text.trim()) && text.trim().length < 30) return true; // SKUs, codes
+    if (/^[A-Z0-9_\-]+$/i.test(text.trim()) && (text.trim().length < 30 && !text.trim().includes('-'))) return true; // SKUs, codes (avoiding hyphenated titles)
     return false;
   }
 
@@ -1490,6 +1490,20 @@ function formatBytes(bytes) {
     for (let i = 0; i < products.length; i++) {
       const orig = products[i];
       const payload = buildShopifyPayload(orig);
+      const lang = sourceLang.value;
+      const langPair = lang === 'auto' ? 'auto|es' : `${lang}|es`;
+
+      // If these are scraped products (scrapedProducts.length > 0), they might need translation
+      // because buildShopifyPayload currently gets data from state.translatedRows (empty for scraped)
+      // OR directly from 'orig'. Let's ensure title/body are translated if not already.
+      if (!state.translatedRows.length || !state.headers.includes('Handle')) {
+        try {
+          const tTitle = await translateText(payload.title, langPair);
+          if (tTitle) payload.title = tTitle;
+          const tBody = await translateText(payload.body_html, langPair);
+          if (tBody) payload.body_html = tBody;
+        } catch (e) { console.warn('Direct translation failed:', e); }
+      }
 
       // Generate AI tag + brand title via Gemini (best-effort, non-blocking)
       try {
