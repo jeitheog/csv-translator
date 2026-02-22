@@ -872,7 +872,7 @@ async function startTranslation() {
     if (!text || text.trim() === '') return true;
     if (/^\d+([.,]\d+)?$/.test(text.trim())) return true;
     if (/^https?:\/\//i.test(text.trim())) return true;
-    if (/^[A-Z0-9_\-]+$/i.test(text.trim()) && (text.trim().length < 30 && !text.trim().includes('-'))) return true; // SKUs, codes (avoiding hyphenated titles)
+    if (/^[A-Z0-9_\-]+$/i.test(text.trim()) && text.trim().length < 8) return true; // Only skip very short SKUs/codes
     return false;
   }
 
@@ -892,7 +892,8 @@ async function startTranslation() {
 
       // Verify: did translation actually change the text?
       const didTranslate = translated !== null && translated !== originalText;
-      const skippable = isSkippable(originalText);
+      // Never skip translating titles
+      const skippable = (colIdx === titleIdx) ? false : isSkippable(originalText);
 
       if (translated === null) {
         // Explicit failure — keep original, mark for retry
