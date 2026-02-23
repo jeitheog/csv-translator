@@ -287,18 +287,52 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
         if not store.endswith(".myshopify.com"):
             store = store + ".myshopify.com"
 
+        # Extract _variant_image_src from each variant before sending to Shopify
+        # (Shopify ignores unknown fields; we handle images in a second pass)
+        var_img_map = {}  # variant_index → img_src
+        for i, variant in enumerate(product.get('variants', [])):
+            src = variant.pop('_variant_image_src', '') or ''
+            if src:
+                var_img_map[i] = src
+
+        # Remove those URLs from product-level images to avoid duplicates
+        variant_img_srcs = set(var_img_map.values())
+        if 'images' in product and variant_img_srcs:
+            product['images'] = [img for img in product['images']
+                                  if img.get('src') not in variant_img_srcs]
+            if not product['images']:
+                del product['images']
+
         status, data = self._shopify_request(
             store, token, "POST", "products.json", {"product": product}
         )
 
         if status == 201:
             created = data.get("product", {})
+            product_id = created.get("id")
+            created_variants = created.get("variants", [])
+
+            # Second pass: associate variant images using the real variant IDs
+            if var_img_map and product_id:
+                img_to_vids = {}
+                for idx, src in var_img_map.items():
+                    if idx < len(created_variants):
+                        vid = created_variants[idx]["id"]
+                        img_to_vids.setdefault(src, []).append(vid)
+
+                for src, vids in img_to_vids.items():
+                    self._shopify_request(
+                        store, token, "POST",
+                        f"products/{product_id}/images.json",
+                        {"image": {"src": src, "variant_ids": vids}}
+                    )
+
             self._send_json_response(201, {
                 "success": True,
                 "product": {
-                    "id": created.get("id"),
+                    "id": product_id,
                     "title": created.get("title"),
-                    "variants_count": len(created.get("variants", [])),
+                    "variants_count": len(created_variants),
                 }
             })
         else:
