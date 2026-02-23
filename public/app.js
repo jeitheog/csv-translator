@@ -233,7 +233,8 @@ function csvToProducts(headers, rows) {
         handle: trimmedHandle,
         title: (titleIdx >= 0 ? row[titleIdx] : '') || trimmedHandle,
         images: imgIdx >= 0 && row[imgIdx] && row[imgIdx].toString().startsWith('http') ? [{ src: row[imgIdx] }] : [],
-        variants: priceIdx >= 0 && row[priceIdx] ? [{ price: row[priceIdx].toString().replace(/[^0-9.]/g, '') }] : []
+        variants: priceIdx >= 0 && row[priceIdx] ? [{ price: row[priceIdx].toString().replace(/[^0-9.]/g, '') }] : [],
+        fromCSV: true
       });
     } else {
       const p = productsMap.get(trimmedHandle);
