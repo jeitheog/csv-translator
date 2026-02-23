@@ -1567,80 +1567,11 @@ function formatBytes(bytes) {
     testBtn.disabled = false;
   };
 
-  // ── Reanudar job guardado ───────────────────────────────
-  (function checkSavedJob() {
-    const savedId = localStorage.getItem('shp_import_job');
-    if (!savedId) return;
-    importLog.style.display = '';
-    const p = document.createElement('p');
-    p.style.cssText = 'margin:0 0 8px;color:#fbbf24;font-size:13px;';
-    p.innerHTML = `Job anterior en progreso: <b>${savedId}</b> — <a href="#" id="resumeJobLink" style="color:#60a5fa;">Ver estado</a> · <a href="#" id="clearJobLink" style="color:rgba(255,255,255,0.4);">Ignorar</a>`;
-    importLog.appendChild(p);
-    p.querySelector('#resumeJobLink').onclick = e => { e.preventDefault(); _startPolling(savedId); };
-    p.querySelector('#clearJobLink').onclick = e => { e.preventDefault(); localStorage.removeItem('shp_import_job'); p.remove(); if (!importLog.children.length) importLog.style.display = 'none'; };
-  })();
-
-  // ── Polling de estado ───────────────────────────────────
-  let _pollTimer = null;
-  function _startPolling(jobId) {
-    if (_pollTimer) clearInterval(_pollTimer);
-    importLog.innerHTML = '';
-    importLog.style.display = '';
-
-    const jobInfoEl = document.createElement('p');
-    jobInfoEl.style.cssText = 'margin:0 0 8px;color:rgba(255,255,255,0.45);font-size:12px;';
-    jobInfoEl.textContent = `Job ID: ${jobId} — El servidor importa en segundo plano. Puedes cerrar esta página.`;
-    importLog.appendChild(jobInfoEl);
-
-    const statusEl = document.createElement('p');
-    statusEl.style.cssText = 'margin:0 0 8px;font-weight:600;';
-    statusEl.textContent = '⏳ Conectando...';
-    importLog.appendChild(statusEl);
-
-    const renderedIdx = new Set();
-
-    _pollTimer = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/shopify/import-job?id=${jobId}`);
-        if (!res.ok) { statusEl.textContent = '⚠️ Servidor no disponible, reintentando...'; return; }
-        const job = await res.json();
-
-        // Renderizar entradas del log aún no mostradas
-        for (const entry of (job.log || [])) {
-          if (renderedIdx.has(entry.index)) continue;
-          renderedIdx.add(entry.index);
-          const row = document.createElement('p');
-          row.style.cssText = 'margin:3px 0;';
-          row.style.color = entry.status === 'ok' ? '#4ade80' : '#f87171';
-          row.textContent = `${entry.status === 'ok' ? '✅' : '❌'} (${entry.index + 1}/${job.total}) ${entry.title}`;
-          importLog.appendChild(row);
-        }
-
-        // Estado general
-        const st = job.status || '';
-        if (st === 'done') {
-          statusEl.textContent = `✅ Listo: ${job.ok} importados, ${job.fail} errores.`;
-          clearInterval(_pollTimer); _pollTimer = null;
-          importBtn.disabled = false;
-          localStorage.removeItem('shp_import_job');
-        } else if (st.startsWith('retrying:')) {
-          const secs = st.split(':')[1];
-          statusEl.textContent = `⚠️ Sin conexión — reintentando en ${secs}s... (${job.current}/${job.total})`;
-        } else {
-          statusEl.textContent = `⏳ Importando... ${job.current}/${job.total}`;
-        }
-      } catch (_) {
-        statusEl.textContent = '⚠️ Servidor no disponible, reintentando...';
-      }
-    }, 2000);
-  }
-
   importBtn.onclick = async () => {
     const { store, token } = getCredentials();
     importBtn.disabled = true;
     importLog.style.display = '';
-    importLog.innerHTML = '';
-
+    // Helper for case-insensitive header matching
     const hArr = state.headers.map(v => (v || '').trim().toLowerCase());
     const findCol = candidates => {
       for (const c of candidates) {
@@ -1653,86 +1584,119 @@ function formatBytes(bytes) {
     const handleIdx = findCol(['Handle', 'URL handle', 'handle', 'id']);
     const titleIdx = findCol(['Title', 'title', 'nombre', 'product title']);
 
+    // Determine the grouping key for a row
     const getRowKey = row => {
       const h = handleIdx >= 0 ? (row[handleIdx] || '').toString().trim() : '';
       const t = titleIdx >= 0 ? (row[titleIdx] || '').toString().trim() : '';
       return (h || t || '').toLowerCase();
     };
 
-    // Construir lista de productos (scraper o CSV)
-    let origProducts = state.selectedProducts;
-    if (!origProducts.length) {
+    // Scraper flow: use selectedProducts. CSV flow: build product list from rows grouped by Handle.
+    let products = state.selectedProducts;
+    if (!products.length) {
+      // Reconstruct product list from CSV (translated or raw)
       const rows = state.translatedRows.length > 0 ? state.translatedRows : state.rows;
       if (rows.length === 0) { showConnStatus('No hay productos para importar.', 'warn'); importBtn.disabled = false; return; }
-      origProducts = [];
+
+      products = [];
       const seen = new Set();
       for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
         const originalRow = state.rows[rowIndex];
         if (!originalRow) continue;
         const key = getRowKey(originalRow);
-        const title = (titleIdx >= 0 ? rows[rowIndex][titleIdx] : '') || key;
-        if (key && !seen.has(key)) { seen.add(key); origProducts.push({ handle: key, title, fromCSV: true }); }
+        const title = (titleIdx >= 0 ? rows[rowIndex][titleIdx] : '') || key; // rows[rowIndex] contains translated title
+        if (key && !seen.has(key)) {
+          seen.add(key);
+          // For manual CSV, we use the key as the identifier
+          products.push({ handle: key, title, fromCSV: true });
+        }
       }
     }
-    if (!origProducts.length) { importBtn.disabled = false; return; }
+    if (!products.length) { importBtn.disabled = false; return; }
+    let ok = 0, fail = 0;
 
-    const lang = sourceLang.value;
-    const langPair = lang === 'auto' ? 'auto|es' : `${lang}|es`;
-
-    // ── Fase 1: Preparar payloads con traducción y AI tags ──
-    const prepStatus = addLogItem(`⚙️ Preparando 0/${origProducts.length} productos...`);
-    const enriched = [];
-
-    for (let i = 0; i < origProducts.length; i++) {
-      const orig = origProducts[i];
+    for (let i = 0; i < products.length; i++) {
+      const orig = products[i];
       const payload = buildShopifyPayload(orig);
+      const lang = sourceLang.value;
+      const langPair = lang === 'auto' ? 'auto|es' : `${lang}|es`;
 
-      // Traducir título/descripción si es flujo scraper
+      // If these are scraped products (scrapedProducts.length > 0)
+      // their titles MUST be translated here because they aren't in the CSV loop.
       if (state.scrapedProducts.length > 0) {
         try {
-          if (payload.title) { const t = await translateText(payload.title, langPair); if (t) payload.title = t; }
-          if (payload.body_html) { const t = await translateText(payload.body_html, langPair); if (t) payload.body_html = t; }
-        } catch (_) {}
+          if (payload.title) {
+            const tTitle = await translateText(payload.title, langPair);
+            if (tTitle) payload.title = tTitle;
+          }
+          if (payload.body_html) {
+            const tBody = await translateText(payload.body_html, langPair);
+            if (tBody) payload.body_html = tBody;
+          }
+        } catch (e) {
+          console.warn('Scraper title/body translation failed:', e);
+        }
       }
 
-      // AI tag (best-effort)
+      // Generate AI tag + brand title via Gemini (best-effort, non-blocking)
       try {
         const tagRes = await fetch('/api/tag', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ title: payload.title, original_title: orig.title, body_html: payload.body_html, vendor: payload.vendor }),
         });
         if (tagRes.ok) {
           const { tag, title: aiTitle } = await tagRes.json();
-          if (tag) payload.tags = tag;
-          else if (aiTitle && aiTitle.includes(' - ')) payload.tags = aiTitle.split(' - ')[0].trim();
+          // Title enrichment is disabled per user request:
+          // if (aiTitle) payload.title = aiTitle;
+
+          // Tag = product name: take from AI, or extract from title before ' - '
+          if (tag) {
+            payload.tags = tag;
+          } else if (aiTitle && aiTitle.includes(' - ')) {
+            payload.tags = aiTitle.split(' - ')[0].trim();
+          }
         }
-      } catch (_) {}
-      if (!payload.tags && payload.title && payload.title.includes(' - ')) payload.tags = payload.title.split(' - ')[0].trim();
+      } catch (_) { /* ignore AI errors, continue with import */ }
 
-      enriched.push(payload);
-      prepStatus.textContent = `⚙️ Preparando ${i + 1}/${origProducts.length} productos...`;
+      // Final fallback: if still no tag but title has ' - ', extract it
+      if (!payload.tags && payload.title && payload.title.includes(' - ')) {
+        payload.tags = payload.title.split(' - ')[0].trim();
+      }
+
+      const logItem = addLogItem(`⏳ (${i + 1}/${products.length}) ${orig.title}...`);
+
+      try {
+        const res = await fetch('/api/shopify/products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ store, token, product: payload }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          logItem.textContent = `✅ (${i + 1}/${products.length}) ${orig.title} — ${data.product.variants_count} variante(s)`;
+          logItem.style.color = '#4ade80';
+          ok++;
+        } else {
+          logItem.textContent = `❌ (${i + 1}/${products.length}) ${orig.title}: ${JSON.stringify(data.error)}`;
+          logItem.style.color = '#f87171';
+          fail++;
+        }
+      } catch (e) {
+        logItem.textContent = `❌ (${i + 1}/${products.length}) ${orig.title}: ${e.message}`;
+        logItem.style.color = '#f87171';
+        fail++;
+      }
+
+      // Small delay to respect Shopify rate limits (2 req/s)
+      await new Promise(r => setTimeout(r, 600));
     }
 
-    // ── Fase 2: Enviar al servidor para importación en background ──
-    prepStatus.textContent = `📤 Enviando ${enriched.length} productos al servidor...`;
-    let jobId;
-    try {
-      const res = await fetch('/api/shopify/import-job', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ store, token, products: enriched }),
-      });
-      const data = await res.json();
-      if (!data.success) { showConnStatus(`❌ ${data.error}`, 'error'); importBtn.disabled = false; return; }
-      jobId = data.job_id;
-    } catch (e) {
-      showConnStatus(`❌ Error al iniciar importación: ${e.message}`, 'error');
-      importBtn.disabled = false;
-      return;
-    }
-
-    localStorage.setItem('shp_import_job', jobId);
-    _startPolling(jobId);
+    const summary = document.createElement('p');
+    summary.style.cssText = 'margin:12px 0 0;font-weight:600;';
+    summary.textContent = `Listo: ${ok} importados, ${fail} errores.`;
+    importLog.appendChild(summary);
+    importBtn.disabled = false;
   };
 
   function buildShopifyPayload(orig) {

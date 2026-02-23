@@ -7,7 +7,6 @@ Uso: python3 server.py
 """
 
 import base64
-import copy
 import hashlib
 import hmac
 import http.server
@@ -15,9 +14,7 @@ import json
 import os
 import ssl
 import sys
-import threading
 import time
-import uuid
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -27,9 +24,6 @@ SHOPIFY_API_VERSION = "2024-01"
 
 # Directorio de archivos estáticos (donde está este script)
 STATIC_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# Directorio para persistir jobs de importación
-JOBS_DIR = os.path.join(STATIC_DIR, '.jobs')
 
 
 # ── Carga .env ──────────────────────────────────────────────
@@ -47,6 +41,7 @@ _load_env()
 
 
 # ── JWT stateless (HMAC-SHA256, sin dependencias externas) ───
+# Funciona igual en local y en Vercel serverless.
 
 def _verify_password(password: str, stored_hash: str, salt: str) -> bool:
     computed = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000).hex()
@@ -79,187 +74,6 @@ def _verify_token(token: str):
         return None
 
 
-# ── Shopify API (módulo-level para usar desde threads) ───────
-
-def _shopify_api(store, token, method, endpoint, data=None):
-    """Llamada directa a Shopify Admin API. Retorna (status_code, response_dict)."""
-    url = f"https://{store}/admin/api/{SHOPIFY_API_VERSION}/{endpoint}"
-    headers = {
-        "X-Shopify-Access-Token": token,
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-    body = json.dumps(data, ensure_ascii=False).encode("utf-8") if data is not None else None
-    req = urllib.request.Request(url, data=body, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req) as resp:
-            resp_body = resp.read().decode("utf-8")
-            return resp.status, json.loads(resp_body) if resp_body else {}
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode("utf-8") if e.fp else "{}"
-        try:
-            error_json = json.loads(error_body)
-        except json.JSONDecodeError:
-            error_json = {"error": error_body}
-        return e.code, error_json
-    except urllib.error.URLError as e:
-        return 0, {"error": f"Sin conexión: {str(e.reason)}"}
-
-
-# ── Jobs en background ───────────────────────────────────────
-
-def _save_job(job):
-    """Guarda el estado del job en disco (escritura atómica)."""
-    os.makedirs(JOBS_DIR, exist_ok=True)
-    path = os.path.join(JOBS_DIR, f"{job['id']}.json")
-    tmp = path + '.tmp'
-    with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(job, f, ensure_ascii=False)
-    os.replace(tmp, path)
-
-
-def _load_job(job_id):
-    """Carga un job desde disco. Retorna None si no existe."""
-    path = os.path.join(JOBS_DIR, f"{job_id}.json")
-    if not os.path.exists(path):
-        return None
-    try:
-        with open(path, encoding='utf-8') as f:
-            return json.load(f)
-    except Exception:
-        return None
-
-
-def _create_one_product(store, token, product):
-    """
-    Crea un producto en Shopify con el proceso de 2 pasos para imágenes de variantes.
-    Retorna (ok: bool, created: dict|None, error: str|None, retryable: bool).
-    """
-    # Extraer _variant_image_src antes de enviar a Shopify
-    var_img_map = {}
-    for i, variant in enumerate(product.get('variants', [])):
-        src = variant.pop('_variant_image_src', '') or ''
-        if src:
-            var_img_map[i] = src
-
-    # Quitar URLs de variantes de las imágenes del producto para evitar duplicados
-    variant_img_srcs = set(var_img_map.values())
-    if 'images' in product and variant_img_srcs:
-        product['images'] = [img for img in product['images']
-                             if img.get('src') not in variant_img_srcs]
-        if not product['images']:
-            del product['images']
-
-    status, data = _shopify_api(store, token, "POST", "products.json", {"product": product})
-
-    if status == 201:
-        created = data.get("product", {})
-        product_id = created.get("id")
-        created_variants = created.get("variants", [])
-
-        # Paso 2: asociar imágenes de variantes con sus variant_ids reales
-        if var_img_map and product_id:
-            img_to_vids = {}
-            for idx, src in var_img_map.items():
-                if idx < len(created_variants):
-                    vid = created_variants[idx]["id"]
-                    img_to_vids.setdefault(src, []).append(vid)
-            for src, vids in img_to_vids.items():
-                _shopify_api(store, token, "POST",
-                             f"products/{product_id}/images.json",
-                             {"image": {"src": src, "variant_ids": vids}})
-
-        return True, created, None, False
-
-    elif status == 0 or status == 429 or status >= 500:
-        # Error de red, rate limit o error del servidor → reintentable
-        error_msg = data.get("error", f"Error {status}")
-        return False, None, error_msg, True
-
-    else:
-        # Error 4xx → no reintentable
-        error_msg = data.get("errors", data.get("error", f"Error {status}"))
-        return False, None, str(error_msg), False
-
-
-def _run_import_job(job_id):
-    """
-    Worker que corre en un thread separado.
-    Importa productos uno a uno con reintentos automáticos si cae internet.
-    """
-    job = _load_job(job_id)
-    if not job:
-        return
-
-    store = job['store']
-    token = job['token']
-    products = job['products']
-
-    job['status'] = 'running'
-    _save_job(job)
-
-    # Delays entre reintentos (segundos): 5, 15, 30, 60, 120
-    RETRY_DELAYS = [5, 15, 30, 60, 120]
-
-    start_from = job.get('current', 0)
-
-    for i in range(start_from, len(products)):
-        product = copy.deepcopy(products[i])
-        title = product.get('title', f'Producto {i + 1}')
-
-        ok = False
-        final_error = 'Error desconocido'
-
-        for attempt in range(len(RETRY_DELAYS) + 1):
-            if attempt > 0:
-                wait = RETRY_DELAYS[attempt - 1]
-                # Actualizar estado en disco para mostrar que está esperando
-                job['status'] = f'retrying:{wait}'
-                _save_job(job)
-                time.sleep(wait)
-                job['status'] = 'running'
-
-            success, created, error, retryable = _create_one_product(
-                store, token, copy.deepcopy(product)
-            )
-
-            if success:
-                ok = True
-                job['log'].append({
-                    'index': i,
-                    'title': title,
-                    'status': 'ok',
-                    'message': f"{len(created.get('variants', []))} variante(s)",
-                })
-                job['ok'] += 1
-                break
-            elif retryable and attempt < len(RETRY_DELAYS):
-                final_error = error
-                continue  # volver a intentar
-            else:
-                final_error = error
-                break
-
-        if not ok:
-            job['log'].append({
-                'index': i,
-                'title': title,
-                'status': 'fail',
-                'message': str(final_error),
-            })
-            job['fail'] += 1
-
-        job['current'] = i + 1
-        job['status'] = 'running'
-        _save_job(job)
-
-        # Respetar rate limit de Shopify (~2 req/s)
-        time.sleep(0.6)
-
-    job['status'] = 'done'
-    _save_job(job)
-
-
 class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
     """Custom handler: sirve archivos estáticos + proxy API para Shopify."""
 
@@ -273,6 +87,7 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def do_OPTIONS(self):
+        """Handle CORS preflight requests."""
         self.send_response(200)
         self._send_cors_headers()
         self.end_headers()
@@ -287,8 +102,6 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_shopify_test()
         elif self.path == "/api/shopify/products":
             self._handle_shopify_create_product()
-        elif self.path == "/api/shopify/import-job":
-            self._handle_import_job()
         elif self.path == "/api/translate":
             self._handle_translate()
         elif self.path == "/api/tag":
@@ -301,12 +114,11 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/auth/verify":
             self._handle_verify()
-        elif self.path.startswith("/api/shopify/import-job"):
-            self._handle_import_job_status()
         else:
             super().do_GET()
 
     def end_headers(self):
+        # Add cache control for dev
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.send_header("Pragma", "no-cache")
         self.send_header("Expires", "0")
@@ -370,6 +182,7 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
             self._send_json_response(401, {'success': False, 'error': 'Credenciales incorrectas'})
 
     def _handle_logout(self):
+        # JWT es stateless: el cliente descarta el token. El servidor confirma.
         self._send_json_response(200, {'success': True})
 
     def _handle_verify(self):
@@ -384,8 +197,42 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
         else:
             self._send_json_response(401, {'success': False, 'error': 'Sesión inválida o expirada'})
 
-    # ─── Shopify Test Connection ─────────────────────────────
+    # ─── Shopify API Proxy ──────────────────────────────────
+    def _shopify_request(self, store, token, method, endpoint, data=None):
+        """
+        Make a request to Shopify Admin API.
+        Returns (status_code, response_dict).
+        """
+        url = f"https://{store}/admin/api/{SHOPIFY_API_VERSION}/{endpoint}"
+        headers = {
+            "X-Shopify-Access-Token": token,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+
+        body = None
+        if data is not None:
+            body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+
+        req = urllib.request.Request(url, data=body, headers=headers, method=method)
+
+        try:
+            with urllib.request.urlopen(req) as resp:
+                resp_body = resp.read().decode("utf-8")
+                return resp.status, json.loads(resp_body) if resp_body else {}
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8") if e.fp else "{}"
+            try:
+                error_json = json.loads(error_body)
+            except json.JSONDecodeError:
+                error_json = {"error": error_body}
+            return e.code, error_json
+        except urllib.error.URLError as e:
+            return 0, {"error": f"No se pudo conectar a Shopify: {str(e.reason)}"}
+
+    # ─── Test Connection ────────────────────────────────────
     def _handle_shopify_test(self):
+        """Test Shopify credentials by fetching shop info."""
         body = self._read_json_body()
         if not body or "store" not in body or "token" not in body:
             self._send_json_response(400, {"error": "Faltan campos: store, token"})
@@ -393,11 +240,13 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
 
         store = body["store"].strip()
         token = body["token"].strip()
+
+        # Normalize store URL
         store = store.replace("https://", "").replace("http://", "").rstrip("/")
         if not store.endswith(".myshopify.com"):
             store = store + ".myshopify.com"
 
-        status, data = _shopify_api(store, token, "GET", "shop.json")
+        status, data = self._shopify_request(store, token, "GET", "shop.json")
 
         if status == 200:
             shop = data.get("shop", {})
@@ -417,8 +266,9 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
                 "error": f"Error de conexión ({status}): {error_msg}"
             })
 
-    # ─── Create Product (single, legacy endpoint) ────────────
+    # ─── Create Product ─────────────────────────────────────
     def _handle_shopify_create_product(self):
+        """Create a product in Shopify."""
         body = self._read_json_body()
         if not body:
             self._send_json_response(400, {"error": "Body vacío"})
@@ -432,87 +282,65 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
             self._send_json_response(400, {"error": "Faltan campos: store, token, product"})
             return
 
+        # Normalize store URL
         store = store.replace("https://", "").replace("http://", "").rstrip("/")
         if not store.endswith(".myshopify.com"):
             store = store + ".myshopify.com"
 
-        ok, created, error, _ = _create_one_product(store, token, product)
+        # Extract _variant_image_src from each variant before sending to Shopify
+        # (Shopify ignores unknown fields; we handle images in a second pass)
+        var_img_map = {}  # variant_index → img_src
+        for i, variant in enumerate(product.get('variants', [])):
+            src = variant.pop('_variant_image_src', '') or ''
+            if src:
+                var_img_map[i] = src
 
-        if ok:
+        # Remove those URLs from product-level images to avoid duplicates
+        variant_img_srcs = set(var_img_map.values())
+        if 'images' in product and variant_img_srcs:
+            product['images'] = [img for img in product['images']
+                                  if img.get('src') not in variant_img_srcs]
+            if not product['images']:
+                del product['images']
+
+        status, data = self._shopify_request(
+            store, token, "POST", "products.json", {"product": product}
+        )
+
+        if status == 201:
+            created = data.get("product", {})
+            product_id = created.get("id")
+            created_variants = created.get("variants", [])
+
+            # Second pass: associate variant images using the real variant IDs
+            if var_img_map and product_id:
+                img_to_vids = {}
+                for idx, src in var_img_map.items():
+                    if idx < len(created_variants):
+                        vid = created_variants[idx]["id"]
+                        img_to_vids.setdefault(src, []).append(vid)
+
+                for src, vids in img_to_vids.items():
+                    self._shopify_request(
+                        store, token, "POST",
+                        f"products/{product_id}/images.json",
+                        {"image": {"src": src, "variant_ids": vids}}
+                    )
+
             self._send_json_response(201, {
                 "success": True,
                 "product": {
-                    "id": created.get("id"),
+                    "id": product_id,
                     "title": created.get("title"),
-                    "variants_count": len(created.get("variants", [])),
+                    "variants_count": len(created_variants),
                 }
             })
         else:
-            self._send_json_response(500, {"success": False, "error": error})
-
-    # ─── Import Job (background) ─────────────────────────────
-    def _handle_import_job(self):
-        """POST /api/shopify/import-job — Crea un job de importación en background."""
-        body = self._read_json_body()
-        if not body:
-            self._send_json_response(400, {"error": "Body vacío"})
-            return
-
-        store = body.get("store", "").strip()
-        token = body.get("token", "").strip()
-        products = body.get("products", [])
-
-        if not store or not token or not products:
-            self._send_json_response(400, {"error": "Faltan campos: store, token, products"})
-            return
-
-        store = store.replace("https://", "").replace("http://", "").rstrip("/")
-        if not store.endswith(".myshopify.com"):
-            store = store + ".myshopify.com"
-
-        job_id = str(uuid.uuid4())[:8]
-        job = {
-            'id': job_id,
-            'store': store,
-            'token': token,
-            'products': products,
-            'status': 'pending',
-            'current': 0,
-            'total': len(products),
-            'ok': 0,
-            'fail': 0,
-            'log': [],
-            'created_at': int(time.time()),
-        }
-        _save_job(job)
-
-        # Iniciar thread en segundo plano (daemon: se cierra si el servidor se cierra)
-        t = threading.Thread(target=_run_import_job, args=(job_id,), daemon=True)
-        t.start()
-
-        self._send_json_response(200, {
-            "success": True,
-            "job_id": job_id,
-            "total": len(products),
-        })
-
-    def _handle_import_job_status(self):
-        """GET /api/shopify/import-job?id=xxx — Estado del job."""
-        params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-        job_id = params.get('id', [None])[0]
-
-        if not job_id:
-            self._send_json_response(400, {"error": "Falta parámetro id"})
-            return
-
-        job = _load_job(job_id)
-        if not job:
-            self._send_json_response(404, {"error": "Job no encontrado"})
-            return
-
-        # No enviar token ni lista de productos en la respuesta
-        safe = {k: v for k, v in job.items() if k not in ('token', 'products')}
-        self._send_json_response(200, safe)
+            error_msg = data.get("errors", data.get("error", "Error al crear producto"))
+            self._send_json_response(status or 500, {
+                "success": False,
+                "error": error_msg
+            })
 
     # ─── Translate proxy ────────────────────────────────────
     def _handle_translate(self):
@@ -525,6 +353,7 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
         if not text or not tl:
             self._send_json_response(400, {"error": "Faltan campos: text, tl"})
             return
+        # Try Google Translate
         try:
             url = (
                 "https://translate.googleapis.com/translate_a/single"
@@ -541,6 +370,7 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
                     return
         except Exception:
             pass
+        # Fallback: MyMemory
         try:
             url2 = f"https://api.mymemory.translated.net/get?q={_urlparse.quote(text)}&langpair={_urlparse.quote(sl + '|' + tl)}"
             with urllib.request.urlopen(url2, timeout=10) as resp:
@@ -687,8 +517,6 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
 
 
 def main():
-    os.makedirs(JOBS_DIR, exist_ok=True)
-
     print()
     print("  🌐 CSV Traductor al Español + Shopify")
     print("  ─────────────────────────────────────────")
@@ -696,13 +524,11 @@ def main():
     print(f"  Carpeta:     {STATIC_DIR}")
     print()
     print("  Endpoints API:")
-    print("    POST /api/auth/login              → Login admin")
-    print("    POST /api/auth/logout             → Logout")
-    print("    GET  /api/auth/verify             → Verificar token")
-    print("    POST /api/shopify/test            → Verificar conexión Shopify")
-    print("    POST /api/shopify/products        → Crear producto (individual)")
-    print("    POST /api/shopify/import-job      → Importar en background")
-    print("    GET  /api/shopify/import-job?id=  → Estado del job")
+    print("    POST /api/auth/login        → Login admin")
+    print("    POST /api/auth/logout       → Logout")
+    print("    GET  /api/auth/verify       → Verificar token")
+    print("    POST /api/shopify/test      → Verificar conexión Shopify")
+    print("    POST /api/shopify/products  → Crear producto Shopify")
     print()
     print("  Presiona Ctrl+C para detener.")
     print("  ─────────────────────────────────────────")
