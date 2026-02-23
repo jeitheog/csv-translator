@@ -1572,6 +1572,16 @@ function formatBytes(bytes) {
     importLog.style.display = '';
     importLog.innerHTML = '';
 
+    // Helper for case-insensitive header matching
+    const hArr = state.headers.map(v => (v || '').trim().toLowerCase());
+    const findCol = candidates => {
+      for (const c of candidates) {
+        const idx = hArr.indexOf(c.toLowerCase());
+        if (idx >= 0) return idx;
+      }
+      return -1;
+    };
+
     // Scraper flow: use selectedProducts. CSV flow: build product list from rows grouped by Handle.
     let products = state.selectedProducts;
     if (!products.length) {
@@ -1579,18 +1589,18 @@ function formatBytes(bytes) {
       const rows = state.translatedRows.length > 0 ? state.translatedRows : state.rows;
       if (rows.length === 0) { showConnStatus('No hay productos para importar.', 'warn'); importBtn.disabled = false; return; }
 
-      const handleIdx = state.headers.indexOf('Handle') >= 0 ? state.headers.indexOf('Handle') : state.headers.indexOf('URL handle');
-      const titleIdx = state.headers.indexOf('Title');
+      const handleIdx = findCol(['Handle', 'URL handle', 'handle', 'id']);
+      const titleIdx = findCol(['Title', 'title', 'nombre', 'product title']);
       const seen = new Set();
       products = [];
       for (const row of rows) {
         const handle = (handleIdx >= 0 ? row[handleIdx] : '') || '';
         const title = (titleIdx >= 0 ? row[titleIdx] : '') || handle;
-        const key = handle || title;
+        const key = (handle || title).trim();
         if (key && !seen.has(key)) {
           seen.add(key);
           // For manual CSV, we use the handle as the identifier
-          products.push({ handle, title, fromCSV: true });
+          products.push({ handle: key, title, fromCSV: true });
         }
       }
     }
@@ -1682,29 +1692,38 @@ function formatBytes(bytes) {
   };
 
   function buildShopifyPayload(orig) {
-    const handleIdx = state.headers.indexOf('Handle') >= 0 ? state.headers.indexOf('Handle') : state.headers.indexOf('URL handle');
-    const titleIdx = state.headers.indexOf('Title');
-    const bodyIdx = state.headers.indexOf('Body (HTML)') >= 0 ? state.headers.indexOf('Body (HTML)') : state.headers.indexOf('Description');
-    const vendorIdx = state.headers.indexOf('Vendor');
-    const typeIdx = state.headers.indexOf('Type');
-    const tagsIdx = state.headers.indexOf('Tags');
+    const hArr = state.headers.map(v => (v || '').trim().toLowerCase());
+    const findCol = candidates => {
+      for (const c of candidates) {
+        const idx = hArr.indexOf(c.toLowerCase());
+        if (idx >= 0) return idx;
+      }
+      return -1;
+    };
 
-    const opt1NameIdx = state.headers.findIndex(h => h.toLowerCase() === 'option1 name');
-    const opt2NameIdx = state.headers.findIndex(h => h.toLowerCase() === 'option2 name');
-    const opt3NameIdx = state.headers.findIndex(h => h.toLowerCase() === 'option3 name');
-    const opt1ValIdx = state.headers.findIndex(h => h.toLowerCase() === 'option1 value');
-    const opt2ValIdx = state.headers.findIndex(h => h.toLowerCase() === 'option2 value');
-    const opt3ValIdx = state.headers.findIndex(h => h.toLowerCase() === 'option3 value');
+    const handleIdx = findCol(['Handle', 'URL handle', 'handle', 'id']);
+    const titleIdx = findCol(['Title', 'title', 'nombre', 'product title']);
+    const bodyIdx = findCol(['Body (HTML)', 'body', 'description', 'descripción', 'cuerpo']);
+    const vendorIdx = findCol(['Vendor', 'vendedor', 'marca', 'brand']);
+    const typeIdx = findCol(['Type', 'tipo', 'categoría', 'product type']);
+    const tagsIdx = findCol(['Tags', 'etiquetas', 'tags']);
 
-    const priceIdx = state.headers.indexOf('Variant Price');
-    const skuIdx = state.headers.indexOf('Variant SKU') >= 0 ? state.headers.indexOf('Variant SKU') : state.headers.indexOf('SKU');
-    const weightIdx = state.headers.indexOf('Variant Grams');
-    const imgIdx = state.headers.indexOf('Image Src');
-    const imgAltIdx = state.headers.indexOf('Image Alt Text');
+    const opt1NameIdx = findCol(['Option1 Name', 'option 1 name', 'opción 1 nombre']);
+    const opt2NameIdx = findCol(['Option2 Name', 'option 2 name', 'opción 2 nombre']);
+    const opt3NameIdx = findCol(['Option3 Name', 'option 3 name', 'opción 3 nombre']);
+    const opt1ValIdx = findCol(['Option1 Value', 'option 1 value', 'opción 1 valor']);
+    const opt2ValIdx = findCol(['Option2 Value', 'option 2 value', 'opción 2 valor']);
+    const opt3ValIdx = findCol(['Option3 Value', 'option 3 value', 'opción 3 valor']);
 
-    // Use translated rows if available, otherwise raw rows
+    const priceIdx = findCol(['Variant Price', 'price', 'precio', 'variant_price']);
+    const skuIdx = findCol(['Variant SKU', 'sku', 'referencia', 'variant_sku']);
+    const weightIdx = findCol(['Variant Grams', 'grams', 'peso', 'variant_grams']);
+    const imgIdx = findCol(['Image Src', 'image', 'imagen', 'img', 'variant image']);
+    const imgAltIdx = findCol(['Image Alt Text', 'image_alt', 'texto_alt_imagen']);
+
+    // Use translated rows if available message content is translated, otherwise raw rows
     const sourceRows = state.translatedRows.length > 0 ? state.translatedRows : state.rows;
-    const allProductRows = sourceRows.filter(r => (r[handleIdx] || '') === orig.handle);
+    const allProductRows = sourceRows.filter(r => (r[handleIdx] || '').trim() === orig.handle);
 
     // If we're coming from a manual CSV, we need to reconstruct EVERYTHING from these rows
     if (orig.fromCSV) {
@@ -1717,12 +1736,12 @@ function formatBytes(bytes) {
 
       // Variants
       const variants = allProductRows
-        .filter(r => (r[priceIdx] || '').trim() !== '' || (r[skuIdx] || '').trim() !== '')
+        .filter(r => (r[priceIdx] || '').trim() !== '' || (r[skuIdx] || '').trim() !== '' || (r[opt1ValIdx] || '').trim() !== '')
         .map(r => ({
           option1: opt1ValIdx >= 0 ? (r[opt1ValIdx] || 'Default Title') : 'Default Title',
           option2: opt2ValIdx >= 0 ? (r[opt2ValIdx] || undefined) : undefined,
           option3: opt3ValIdx >= 0 ? (r[opt3ValIdx] || undefined) : undefined,
-          price: (r[priceIdx] || '0').replace(/[^0-9.]/g, ''),
+          price: (r[priceIdx] || '0').toString().replace(/[^0-9.]/g, ''),
           sku: skuIdx >= 0 ? (r[skuIdx] || '') : '',
           grams: weightIdx >= 0 ? parseInt(r[weightIdx]) || 0 : 0,
           inventory_management: null,
@@ -1738,7 +1757,7 @@ function formatBytes(bytes) {
 
       // Images
       const images = allProductRows
-        .filter(r => imgIdx >= 0 && (r[imgIdx] || '').startsWith('http'))
+        .filter(r => imgIdx >= 0 && (r[imgIdx] || '').toString().startsWith('http'))
         .map(r => ({ src: r[imgIdx], alt: imgAltIdx >= 0 ? r[imgAltIdx] : '' }));
 
       return {
