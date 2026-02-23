@@ -1725,7 +1725,8 @@ function formatBytes(bytes) {
     const priceIdx = findCol(['Variant Price', 'price', 'precio', 'variant_price', 'amount']);
     const skuIdx = findCol(['Variant SKU', 'sku', 'referencia', 'variant_sku', 'code']);
     const weightIdx = findCol(['Variant Grams', 'grams', 'peso', 'variant_grams', 'weight']);
-    const imgIdx = findCol(['Image Src', 'image', 'imagen', 'img', 'variant image', 'image_url', 'img_url', 'image_src']);
+    const imgIdx = findCol(['Image Src', 'image', 'imagen', 'img', 'image_url', 'img_url', 'image_src']);
+    const variantImgIdx = findCol(['Variant Image', 'variant image', 'variant_image']);
     const imgAltIdx = findCol(['Image Alt Text', 'image_alt', 'texto_alt_imagen', 'alt_text']);
 
     // Use translated rows if available message content is translated, otherwise raw rows
@@ -1755,7 +1756,11 @@ function formatBytes(bytes) {
       const variants = allProductRows
         .filter(r => (r[priceIdx] || '').toString().trim() !== '' || (r[skuIdx] || '').toString().trim() !== '' || (r[opt1ValIdx] || '').toString().trim() !== '')
         .map(r => {
-          const rawImg = (imgIdx >= 0 ? (r[imgIdx] || '').toString().trim() : '');
+          const rawImg = (() => {
+            const vi = variantImgIdx >= 0 ? (r[variantImgIdx] || '').toString().trim() : '';
+            if (vi) return vi;
+            return imgIdx >= 0 ? (r[imgIdx] || '').toString().trim() : '';
+          })();
           const variantImg = rawImg.startsWith('//') ? 'https:' + rawImg : rawImg;
 
           return {
@@ -1839,9 +1844,13 @@ function formatBytes(bytes) {
       const translOpt2 = opt2ValIdx >= 0 ? (row[opt2ValIdx] || '').trim() : '';
       const translOpt3 = opt3ValIdx >= 0 ? (row[opt3ValIdx] || '').trim() : '';
 
-      const rawImg = (imgIdx >= 0 && row[imgIdx] && (row[imgIdx].toString().trim().startsWith('http') || row[imgIdx].toString().trim().startsWith('//')))
-        ? row[imgIdx].toString().trim()
-        : (v.featured_image ? v.featured_image.src : '');
+      const rawImg = (() => {
+        const vi = variantImgIdx >= 0 ? (row[variantImgIdx] || '').toString().trim() : '';
+        if (vi && (vi.startsWith('http') || vi.startsWith('//'))) return vi;
+        const pi = imgIdx >= 0 ? (row[imgIdx] || '').toString().trim() : '';
+        if (pi && (pi.startsWith('http') || pi.startsWith('//'))) return pi;
+        return v.featured_image ? v.featured_image.src : '';
+      })();
       const variantImg = rawImg.startsWith('//') ? 'https:' + rawImg : rawImg;
 
       const vObj = {
