@@ -1754,17 +1754,23 @@ function formatBytes(bytes) {
       // Variants
       const variants = allProductRows
         .filter(r => (r[priceIdx] || '').toString().trim() !== '' || (r[skuIdx] || '').toString().trim() !== '' || (r[opt1ValIdx] || '').toString().trim() !== '')
-        .map(r => ({
-          option1: opt1ValIdx >= 0 ? (r[opt1ValIdx] || 'Default Title') : 'Default Title',
-          option2: opt2ValIdx >= 0 ? (r[opt2ValIdx] || undefined) : undefined,
-          option3: opt3ValIdx >= 0 ? (r[opt3ValIdx] || undefined) : undefined,
-          price: (r[priceIdx] || '0').toString().replace(/[^0-9.]/g, ''),
-          sku: skuIdx >= 0 ? (r[skuIdx] || '').toString().trim() : '',
-          grams: weightIdx >= 0 ? parseInt(r[weightIdx]) || 0 : 0,
-          inventory_management: null,
-          inventory_policy: 'continue',
-          fulfillment_service: 'manual'
-        }));
+        .map(r => {
+          const rawImg = (imgIdx >= 0 ? (r[imgIdx] || '').toString().trim() : '');
+          const variantImg = rawImg.startsWith('//') ? 'https:' + rawImg : rawImg;
+
+          return {
+            option1: opt1ValIdx >= 0 ? (r[opt1ValIdx] || 'Default Title') : 'Default Title',
+            option2: opt2ValIdx >= 0 ? (r[opt2ValIdx] || undefined) : undefined,
+            option3: opt3ValIdx >= 0 ? (r[opt3ValIdx] || undefined) : undefined,
+            price: (r[priceIdx] || '0').toString().replace(/[^0-9.]/g, ''),
+            sku: skuIdx >= 0 ? (r[skuIdx] || '').toString().trim() : '',
+            grams: weightIdx >= 0 ? parseInt(r[weightIdx]) || 0 : 0,
+            _variant_image_src: variantImg,
+            inventory_management: null,
+            inventory_policy: 'continue',
+            fulfillment_service: 'manual'
+          };
+        });
 
       // Options (default to 'Title' if name is missing but values exist)
       const options = [];
@@ -1833,6 +1839,11 @@ function formatBytes(bytes) {
       const translOpt2 = opt2ValIdx >= 0 ? (row[opt2ValIdx] || '').trim() : '';
       const translOpt3 = opt3ValIdx >= 0 ? (row[opt3ValIdx] || '').trim() : '';
 
+      const rawImg = (imgIdx >= 0 && row[imgIdx] && (row[imgIdx].toString().trim().startsWith('http') || row[imgIdx].toString().trim().startsWith('//')))
+        ? row[imgIdx].toString().trim()
+        : (v.featured_image ? v.featured_image.src : '');
+      const variantImg = rawImg.startsWith('//') ? 'https:' + rawImg : rawImg;
+
       const vObj = {
         option1: translOpt1 || v.option1 || '',
         price: v.price || '0',
@@ -1844,7 +1855,7 @@ function formatBytes(bytes) {
         taxable: v.taxable !== false,
         requires_shipping: v.requires_shipping !== false,
         barcode: v.barcode || '',
-        _variant_image_src: v.featured_image ? v.featured_image.src : '',
+        _variant_image_src: variantImg,
       };
       if (v.compare_at_price) vObj.compare_at_price = v.compare_at_price;
       if (translOpt2 || v.option2) vObj.option2 = translOpt2 || v.option2;
