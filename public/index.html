@@ -60,11 +60,12 @@
       <div class="import-url-section">
         <div class="import-divider">— o importa productos directamente desde una tienda Shopify —</div>
         <div class="import-url-row">
-          <input type="text" id="shopifyImportUrl" class="select"
-            placeholder="ej: montela.de o https://montela.de" style="flex:1;padding:10px;" />
+          <input type="text" id="shopifyImportUrl" class="select" placeholder="ej: montela.de o https://montela.de"
+            style="flex:1;padding:10px;" />
           <button class="btn btn-outline" id="importFromUrlBtn">🔍 Importar productos</button>
         </div>
-        <p class="config-hint" style="margin-top:6px;">Solo extrae los <strong>productos</strong> de la tienda (título, descripción, variantes, imágenes). No extrae páginas, colecciones ni blog.</p>
+        <p class="config-hint" style="margin-top:6px;">Solo extrae los <strong>productos</strong> de la tienda (título,
+          descripción, variantes, imágenes). No extrae páginas, colecciones ni blog.</p>
         <p id="importStatus" class="config-hint hidden" style="margin-top:6px;"></p>
       </div>
     </section>
@@ -79,9 +80,8 @@
         <button class="btn-text" id="deselectAllProducts">Deseleccionar todos</button>
         <button class="btn-text" id="backToUpload" style="margin-left:auto;">← Volver</button>
       </div>
-      <input type="text" id="productSearchInput"
-             placeholder="🔍 Buscar producto por nombre..."
-             style="width:100%;padding:9px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:#fff;font-size:0.9rem;margin-bottom:12px;box-sizing:border-box;outline:none;" />
+      <input type="text" id="productSearchInput" placeholder="🔍 Buscar producto por nombre..."
+        style="width:100%;padding:9px 14px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:#fff;font-size:0.9rem;margin-bottom:12px;box-sizing:border-box;outline:none;" />
       <div class="products-grid" id="productsGrid"></div>
       <button class="btn btn-primary" id="continueWithSelected" disabled style="margin-top:16px;">
         ✨ Traducir seleccionados
@@ -196,7 +196,7 @@
       <h2>¡Traducción completada! 🎉</h2>
       <div class="result-stats" id="resultStats"></div>
 
-      <div class="result-tabs">
+      <div class="result-tabs" style="margin-top: 2rem;">
         <button class="tab active" data-tab="translated">Traducido</button>
         <button class="tab" data-tab="comparison">Comparación</button>
       </div>
@@ -213,54 +213,48 @@
       </div>
 
       <div class="result-actions">
-        <button class="btn btn-primary" id="downloadBtn">
-          ⬇️ Descargar CSV Traducido
-        </button>
-        <button class="btn btn-outline" id="startOverBtn">
-          🔄 Traducir otro archivo
-        </button>
+        <button class="btn btn-primary" id="downloadBtn">⬇️ Descargar CSV Traducido</button>
+        <button class="btn btn-outline" id="startOverBtn">🔄 Traducir otro archivo</button>
       </div>
+    </section>
 
-      <!-- ── Shopify Direct Import ── -->
-      <div class="shopify-import-panel" id="shopifyImportPanel" style="display:none;">
-        <div class="import-divider" style="margin:24px 0 16px;">── O importa directamente a tu tienda Shopify ──</div>
+    <!-- SHARED Shopify Import Card -->
+    <section class="card hidden" id="shopifyStep">
+      <div class="step-badge" style="background: #95bf47;">🛍️</div>
+      <h2>Importar directamente a Shopify</h2>
+      <div class="shopify-import-panel" style="margin-top: 0;">
+        <p class="config-hint" style="margin-bottom: 16px;">Introduce las credenciales de tu tienda para subir los
+          productos traducidos automáticamente.</p>
 
         <div class="shopify-creds-row">
-          <input id="shopifyDestStore" type="text"
-                 placeholder="mi-tienda.myshopify.com"
-                 class="select" style="flex:1;padding:10px;" />
+          <input id="shopifyDestStore" type="text" placeholder="mi-tienda.myshopify.com" class="select"
+            style="flex:1;padding:10px;" />
           <div style="position:relative;flex:1;">
-            <input id="shopifyDestToken" type="password"
-                   placeholder="Access token (shpat_...)"
-                   class="select" style="width:100%;padding:10px;box-sizing:border-box;" />
+            <input id="shopifyDestToken" type="password" placeholder="Access token (shpat_...)" class="select"
+              style="width:100%;padding:10px;box-sizing:border-box;" />
             <button id="shopifyTokenToggle"
-                    style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:rgba(255,255,255,0.5);font-size:0.85rem;">
-              👁
-            </button>
+              style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:rgba(255,255,255,0.5);font-size:0.85rem;">👁</button>
           </div>
           <button class="btn btn-outline" id="shopifyTestConn">🔗 Verificar</button>
         </div>
-
         <p id="shopifyConnStatus" class="config-hint" style="display:none;margin-top:8px;"></p>
-
         <details style="margin:10px 0;">
-          <summary style="cursor:pointer;font-size:0.82rem;color:rgba(255,255,255,0.45);">
-            ¿Cómo obtener el Access Token?
+          <summary style="cursor:pointer;font-size:0.82rem;color:rgba(255,255,255,0.45);">¿Cómo obtener el Access Token?
           </summary>
           <ol style="font-size:0.82rem;color:rgba(255,255,255,0.55);margin:8px 0 0 16px;line-height:1.8;">
             <li>Ve a tu Shopify Admin → <strong>Settings → Apps → Develop apps</strong></li>
             <li>Crea una nueva app (dale cualquier nombre)</li>
-            <li>En <strong>Configuration</strong> → Admin API scopes: activa <code>write_products</code> y <code>read_products</code></li>
+            <li>En <strong>Configuration</strong> → Admin API scopes: activa <code>write_products</code> y
+              <code>read_products</code></li>
             <li>Haz clic en <strong>Install app</strong></li>
             <li>Copia el <strong>Admin API access token</strong> (empieza por <code>shpat_</code>)</li>
           </ol>
         </details>
-
-        <button class="btn btn-primary" id="shopifyDirectImport" disabled style="width:100%;margin-top:12px;">
-          🚀 Importar productos a Shopify
-        </button>
-
-        <div id="shopifyImportLog" style="display:none;margin-top:16px;max-height:260px;overflow-y:auto;border-radius:10px;border:1px solid rgba(255,255,255,0.08);padding:12px;font-size:0.85rem;"></div>
+        <button class="btn btn-primary" id="shopifyDirectImport" disabled style="width:100%;margin-top:12px;">🚀
+          Importar productos a Shopify</button>
+        <div id="shopifyImportLog"
+          style="display:none;margin-top:16px;max-height:260px;overflow-y:auto;border-radius:10px;border:1px solid rgba(255,255,255,0.08);padding:12px;font-size:0.85rem;">
+        </div>
       </div>
     </section>
 
