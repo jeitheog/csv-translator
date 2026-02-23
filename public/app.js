@@ -1598,11 +1598,12 @@ function formatBytes(bytes) {
       const rows = state.translatedRows.length > 0 ? state.translatedRows : state.rows;
       if (rows.length === 0) { showConnStatus('No hay productos para importar.', 'warn'); importBtn.disabled = false; return; }
 
-      const seen = new Set();
       products = [];
-      for (const row of rows) {
-        const key = getRowKey(row);
-        const title = (titleIdx >= 0 ? row[titleIdx] : '') || key;
+      for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+        const originalRow = state.rows[rowIndex];
+        if (!originalRow) continue;
+        const key = getRowKey(originalRow);
+        const title = (titleIdx >= 0 ? rows[rowIndex][titleIdx] : '') || key; // rows[rowIndex] contains translated title
         if (key && !seen.has(key)) {
           seen.add(key);
           // For manual CSV, we use the key as the identifier
@@ -1730,13 +1731,16 @@ function formatBytes(bytes) {
     // Use translated rows if available message content is translated, otherwise raw rows
     const sourceRows = state.translatedRows.length > 0 ? state.translatedRows : state.rows;
 
-    const getRowKey = row => {
-      const h = handleIdx >= 0 ? (row[handleIdx] || '').toString().trim() : '';
-      const t = titleIdx >= 0 ? (row[titleIdx] || '').toString().trim() : '';
-      return (h || t || '').toLowerCase();
-    };
-
-    const allProductRows = sourceRows.filter(r => getRowKey(r) === (orig.handle || '').toLowerCase());
+    // For stable grouping (translation might change Title, but Handle/Identity should remain)
+    // we use the original row corresponding to this translated row's index if possible.
+    const allProductRows = sourceRows.filter((r, idx) => {
+      const originalRow = state.rows[idx];
+      if (!originalRow) return false;
+      const h = handleIdx >= 0 ? (originalRow[handleIdx] || '').toString().trim() : '';
+      const t = titleIdx >= 0 ? (originalRow[titleIdx] || '').toString().trim() : '';
+      const key = (h || t || '').toLowerCase();
+      return key === (orig.handle || '').toLowerCase();
+    });
 
     // If we're coming from a manual CSV, we need to reconstruct EVERYTHING from these rows
     if (orig.fromCSV) {
