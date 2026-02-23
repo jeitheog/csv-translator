@@ -1599,6 +1599,7 @@ function formatBytes(bytes) {
       if (rows.length === 0) { showConnStatus('No hay productos para importar.', 'warn'); importBtn.disabled = false; return; }
 
       products = [];
+      const seen = new Set();
       for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
         const originalRow = state.rows[rowIndex];
         if (!originalRow) continue;
@@ -1797,6 +1798,15 @@ function formatBytes(bytes) {
           const fullSrc = src.startsWith('//') ? 'https:' + src : src;
           if (!imageMap.has(fullSrc)) {
             imageMap.set(fullSrc, { src: fullSrc, alt: (imgAltIdx >= 0 ? r[imgAltIdx] : '') || '' });
+          }
+        }
+        if (variantImgIdx >= 0) {
+          const vsrc = (r[variantImgIdx] || '').toString().trim();
+          if (vsrc && (vsrc.startsWith('http') || vsrc.startsWith('//'))) {
+            const fullVsrc = vsrc.startsWith('//') ? 'https:' + vsrc : vsrc;
+            if (!imageMap.has(fullVsrc)) {
+              imageMap.set(fullVsrc, { src: fullVsrc, alt: '' });
+            }
           }
         }
       });
