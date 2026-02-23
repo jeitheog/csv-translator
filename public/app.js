@@ -1570,8 +1570,6 @@ function formatBytes(bytes) {
     const { store, token } = getCredentials();
     importBtn.disabled = true;
     importLog.style.display = '';
-    importLog.innerHTML = '';
-
     // Helper for case-insensitive header matching
     const hArr = state.headers.map(v => (v || '').trim().toLowerCase());
     const findCol = candidates => {
@@ -1582,6 +1580,16 @@ function formatBytes(bytes) {
       return -1;
     };
 
+    const handleIdx = findCol(['Handle', 'URL handle', 'handle', 'id']);
+    const titleIdx = findCol(['Title', 'title', 'nombre', 'product title']);
+
+    // Determine the grouping key for a row
+    const getRowKey = row => {
+      const h = handleIdx >= 0 ? (row[handleIdx] || '').toString().trim() : '';
+      const t = titleIdx >= 0 ? (row[titleIdx] || '').toString().trim() : '';
+      return (h || t || '').toLowerCase();
+    };
+
     // Scraper flow: use selectedProducts. CSV flow: build product list from rows grouped by Handle.
     let products = state.selectedProducts;
     if (!products.length) {
@@ -1589,17 +1597,14 @@ function formatBytes(bytes) {
       const rows = state.translatedRows.length > 0 ? state.translatedRows : state.rows;
       if (rows.length === 0) { showConnStatus('No hay productos para importar.', 'warn'); importBtn.disabled = false; return; }
 
-      const handleIdx = findCol(['Handle', 'URL handle', 'handle', 'id']);
-      const titleIdx = findCol(['Title', 'title', 'nombre', 'product title']);
       const seen = new Set();
       products = [];
       for (const row of rows) {
-        const handle = (handleIdx >= 0 ? row[handleIdx] : '') || '';
-        const title = (titleIdx >= 0 ? row[titleIdx] : '') || handle;
-        const key = (handle || title).trim();
+        const key = getRowKey(row);
+        const title = (titleIdx >= 0 ? row[titleIdx] : '') || key;
         if (key && !seen.has(key)) {
           seen.add(key);
-          // For manual CSV, we use the handle as the identifier
+          // For manual CSV, we use the key as the identifier
           products.push({ handle: key, title, fromCSV: true });
         }
       }
@@ -1715,50 +1720,71 @@ function formatBytes(bytes) {
     const opt2ValIdx = findCol(['Option2 Value', 'option 2 value', 'opción 2 valor']);
     const opt3ValIdx = findCol(['Option3 Value', 'option 3 value', 'opción 3 valor']);
 
-    const priceIdx = findCol(['Variant Price', 'price', 'precio', 'variant_price']);
-    const skuIdx = findCol(['Variant SKU', 'sku', 'referencia', 'variant_sku']);
-    const weightIdx = findCol(['Variant Grams', 'grams', 'peso', 'variant_grams']);
-    const imgIdx = findCol(['Image Src', 'image', 'imagen', 'img', 'variant image']);
-    const imgAltIdx = findCol(['Image Alt Text', 'image_alt', 'texto_alt_imagen']);
+    const priceIdx = findCol(['Variant Price', 'price', 'precio', 'variant_price', 'amount']);
+    const skuIdx = findCol(['Variant SKU', 'sku', 'referencia', 'variant_sku', 'code']);
+    const weightIdx = findCol(['Variant Grams', 'grams', 'peso', 'variant_grams', 'weight']);
+    const imgIdx = findCol(['Image Src', 'image', 'imagen', 'img', 'variant image', 'image_url', 'img_url', 'image_src']);
+    const imgAltIdx = findCol(['Image Alt Text', 'image_alt', 'texto_alt_imagen', 'alt_text']);
 
     // Use translated rows if available message content is translated, otherwise raw rows
     const sourceRows = state.translatedRows.length > 0 ? state.translatedRows : state.rows;
-    const allProductRows = sourceRows.filter(r => (r[handleIdx] || '').trim() === orig.handle);
+
+    const getRowKey = row => {
+      const h = handleIdx >= 0 ? (row[handleIdx] || '').toString().trim() : '';
+      const t = titleIdx >= 0 ? (row[titleIdx] || '').toString().trim() : '';
+      return (h || t || '').toLowerCase();
+    };
+
+    const allProductRows = sourceRows.filter(r => getRowKey(r) === (orig.handle || '').toLowerCase());
 
     // If we're coming from a manual CSV, we need to reconstruct EVERYTHING from these rows
     if (orig.fromCSV) {
-      const firstWithData = allProductRows.find(r => (r[titleIdx] || '').trim()) || allProductRows[0];
-      const title = (firstWithData[titleIdx] || orig.title || '').trim();
-      const body_html = (bodyIdx >= 0 ? firstWithData[bodyIdx] : '').trim();
-      const vendor = (vendorIdx >= 0 ? firstWithData[vendorIdx] : brandNameInput.value).trim();
-      const product_type = (typeIdx >= 0 ? firstWithData[typeIdx] : '').trim();
-      const tags = (tagsIdx >= 0 ? firstWithData[tagsIdx] : '').trim();
+      const firstWithData = allProductRows.find(r => (r[titleIdx] || '').toString().trim()) || allProductRows[0];
+      const title = (firstWithData[titleIdx] || orig.title || '').toString().trim();
+      const body_html = (bodyIdx >= 0 ? firstWithData[bodyIdx] : '').toString().trim();
+      const vendor = (vendorIdx >= 0 ? (firstWithData[vendorIdx] || brandNameInput.value) : brandNameInput.value).toString().trim();
+      const product_type = (typeIdx >= 0 ? (firstWithData[typeIdx] || '') : '').toString().trim();
+      const tags = (tagsIdx >= 0 ? (firstWithData[tagsIdx] || '') : '').toString().trim();
 
       // Variants
       const variants = allProductRows
-        .filter(r => (r[priceIdx] || '').trim() !== '' || (r[skuIdx] || '').trim() !== '' || (r[opt1ValIdx] || '').trim() !== '')
+        .filter(r => (r[priceIdx] || '').toString().trim() !== '' || (r[skuIdx] || '').toString().trim() !== '' || (r[opt1ValIdx] || '').toString().trim() !== '')
         .map(r => ({
           option1: opt1ValIdx >= 0 ? (r[opt1ValIdx] || 'Default Title') : 'Default Title',
           option2: opt2ValIdx >= 0 ? (r[opt2ValIdx] || undefined) : undefined,
           option3: opt3ValIdx >= 0 ? (r[opt3ValIdx] || undefined) : undefined,
           price: (r[priceIdx] || '0').toString().replace(/[^0-9.]/g, ''),
-          sku: skuIdx >= 0 ? (r[skuIdx] || '') : '',
+          sku: skuIdx >= 0 ? (r[skuIdx] || '').toString().trim() : '',
           grams: weightIdx >= 0 ? parseInt(r[weightIdx]) || 0 : 0,
           inventory_management: null,
           inventory_policy: 'continue',
           fulfillment_service: 'manual'
         }));
 
-      // Options
+      // Options (default to 'Title' if name is missing but values exist)
       const options = [];
-      if (opt1NameIdx >= 0 && firstWithData[opt1NameIdx]) options.push({ name: firstWithData[opt1NameIdx], values: [...new Set(allProductRows.map(r => r[opt1ValIdx]).filter(v => v))] });
-      if (opt2NameIdx >= 0 && firstWithData[opt2NameIdx]) options.push({ name: firstWithData[opt2NameIdx], values: [...new Set(allProductRows.map(r => r[opt2ValIdx]).filter(v => v))] });
-      if (opt3NameIdx >= 0 && firstWithData[opt3NameIdx]) options.push({ name: firstWithData[opt3NameIdx], values: [...new Set(allProductRows.map(r => r[opt3ValIdx]).filter(v => v))] });
+      if (allProductRows.some(r => r[opt1ValIdx])) {
+        options.push({ name: (opt1NameIdx >= 0 && firstWithData[opt1NameIdx]) ? firstWithData[opt1NameIdx] : 'Title', values: [...new Set(allProductRows.map(r => r[opt1ValIdx]).filter(v => v))] });
+      }
+      if (allProductRows.some(r => r[opt2ValIdx])) {
+        options.push({ name: (opt2NameIdx >= 0 && firstWithData[opt2NameIdx]) ? firstWithData[opt2NameIdx] : 'Option 2', values: [...new Set(allProductRows.map(r => r[opt2ValIdx]).filter(v => v))] });
+      }
+      if (allProductRows.some(r => r[opt3ValIdx])) {
+        options.push({ name: (opt3NameIdx >= 0 && firstWithData[opt3NameIdx]) ? firstWithData[opt3NameIdx] : 'Option 3', values: [...new Set(allProductRows.map(r => r[opt3ValIdx]).filter(v => v))] });
+      }
 
-      // Images
-      const images = allProductRows
-        .filter(r => imgIdx >= 0 && (r[imgIdx] || '').toString().startsWith('http'))
-        .map(r => ({ src: r[imgIdx], alt: imgAltIdx >= 0 ? r[imgAltIdx] : '' }));
+      // Images (Deduplicated)
+      const imageMap = new Map();
+      allProductRows.forEach(r => {
+        const src = (r[imgIdx] || '').toString().trim();
+        if (src && (src.startsWith('http') || src.startsWith('//'))) {
+          const fullSrc = src.startsWith('//') ? 'https:' + src : src;
+          if (!imageMap.has(fullSrc)) {
+            imageMap.set(fullSrc, { src: fullSrc, alt: (imgAltIdx >= 0 ? r[imgAltIdx] : '') || '' });
+          }
+        }
+      });
+      const images = Array.from(imageMap.values());
 
       return {
         title, body_html, vendor, product_type, tags,
