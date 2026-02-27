@@ -267,6 +267,13 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
             })
 
     # ─── Create Product ─────────────────────────────────────
+    @staticmethod
+    def _norm(s):
+        if not s: return ""
+        s = s.strip()
+        if s.startswith("//"): s = "https:" + s
+        return s.split('?')[0].lower()
+
     def _handle_shopify_create_product(self):
         """Create a product in Shopify."""
         body = self._read_json_body()
@@ -287,28 +294,28 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
         if not store.endswith(".myshopify.com"):
             store = store + ".myshopify.com"
 
-        def _norm_img(s):
-            if not s: return ""
-            s = s.strip()
-            if s.startswith("//"): s = "https:" + s
-            return s.split('?')[0] # Remove query params for stable comparison
-
-        # Extract _variant_image_src from each variant before sending to Shopify
-        # (Shopify ignores unknown fields; we handle images in a second pass)
-        var_img_map = {}  # variant_index → img_src
-        for i, variant in enumerate(product.get('variants', [])):
-            src = _norm_img(variant.pop('_variant_image_src', '') or '')
+        # 1. Map each variant to an image index based on its _variant_image_src
+        images_list = product.get('images', [])
+        image_norm_map = {self._norm(img.get('src')): i for i, img in enumerate(images_list)}
+        
+        # variant_index -> image_index
+        v_to_img_idx = {}
+        for i, v in enumerate(product.get('variants', [])):
+            src = v.pop('_variant_image_src', '')
             if src:
-                var_img_map[i] = src
+                norm_src = self._norm(src)
+                if norm_src in image_norm_map:
+                    v_to_img_idx[i] = image_norm_map[norm_src]
+                else:
+                    # Not in gallery, add it
+                    new_idx = len(images_list)
+                    images_list.append({'src': src})
+                    image_norm_map[norm_src] = new_idx
+                    v_to_img_idx[i] = new_idx
+        
+        product['images'] = images_list
 
-        # Remove those URLs from product-level images to avoid duplicates
-        variant_img_srcs = set(var_img_map.values())
-        if 'images' in product and variant_img_srcs:
-            product['images'] = [img for img in product['images']
-                                  if _norm_img(img.get('src')) not in variant_img_srcs]
-            if not product['images']:
-                del product['images']
-
+        # 2. Create the product
         status, data = self._shopify_request(
             store, token, "POST", "products.json", {"product": product}
         )
@@ -316,22 +323,22 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
         if status == 201:
             created = data.get("product", {})
             product_id = created.get("id")
+            created_images = created.get("images", [])
             created_variants = created.get("variants", [])
 
-            # Second pass: associate variant images using the real variant IDs
-            if var_img_map and product_id:
-                img_to_vids = {}
-                for idx, src in var_img_map.items():
-                    if idx < len(created_variants):
-                        vid = created_variants[idx]["id"]
-                        img_to_vids.setdefault(src, []).append(vid)
-
-                for src, vids in img_to_vids.items():
+            # 3. Associate images with variants using IDs (order is preserved)
+            import time
+            for v_idx, img_idx in v_to_img_idx.items():
+                if v_idx < len(created_variants) and img_idx < len(created_images):
+                    vid = created_variants[v_idx]['id']
+                    iid = created_images[img_idx]['id']
+                    
                     self._shopify_request(
-                        store, token, "POST",
-                        f"products/{product_id}/images.json",
-                        {"image": {"src": src, "variant_ids": vids}}
+                        store, token, "PUT",
+                        f"variants/{vid}.json",
+                        {"variant": {"id": vid, "image_id": iid}}
                     )
+                    time.sleep(0.4) # Rate limit safety
 
             self._send_json_response(201, {
                 "success": True,

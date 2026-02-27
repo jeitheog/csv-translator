@@ -40,11 +40,11 @@ def _extract_filename(url):
 
 class handler(BaseHTTPRequestHandler):
 
-    def _norm_img(self, s):
+    def _norm(self, s):
         if not s: return ""
         s = s.strip()
         if s.startswith("//"): s = "https:" + s
-        return s.split('?')[0] # Remove query params for stable comparison
+        return s.split('?')[0].lower()
 
     def do_POST(self):
         length = int(self.headers.get('Content-Length', 0))
@@ -60,46 +60,49 @@ class handler(BaseHTTPRequestHandler):
             self._respond(400, {'error': 'Faltan campos: store, token, product'})
             return
 
-        # Extract _variant_image_src from each variant
-        # Map variant_index to the ORIGINAL source URL
-        var_img_map = {}  # variant_index -> original_src
-        for i, variant in enumerate(product.get('variants', [])):
-            src = (variant.pop('_variant_image_src', '') or '').strip()
+        # 1. Map each variant to an image index based on its _variant_image_src
+        images_list = product.get('images', [])
+        image_norm_map = {self._norm(img.get('src')): i for i, img in enumerate(images_list)}
+        
+        # variant_index -> image_index
+        v_to_img_idx = {}
+        for i, v in enumerate(product.get('variants', [])):
+            src = v.pop('_variant_image_src', '')
             if src:
-                var_img_map[i] = src
+                norm_src = self._norm(src)
+                if norm_src in image_norm_map:
+                    v_to_img_idx[i] = image_norm_map[norm_src]
+                else:
+                    # If variant image is not in gallery, add it to have an ID
+                    new_idx = len(images_list)
+                    images_list.append({'src': src})
+                    image_norm_map[norm_src] = new_idx
+                    v_to_img_idx[i] = new_idx
+        
+        product['images'] = images_list
 
-        # Deduplicate: remove variant images from product['images'] if they match (normalized)
-        variant_norm_keys = set(self._norm_img(s) for s in var_img_map.values())
-        if 'images' in product and variant_norm_keys:
-            product['images'] = [img for img in product['images']
-                                  if self._norm_img(img.get('src')) not in variant_norm_keys]
-            if not product['images']:
-                del product['images']
-
+        # 2. Create the product
         status, data = _shopify_request(store, token, 'POST', 'products.json', {'product': product})
 
         if status == 201:
             created = data.get('product', {})
             product_id = created.get('id')
+            created_images = created.get('images', [])
             created_variants = created.get('variants', [])
 
-            # Second pass: association by re-uploading with variant_ids
-            # This is slow but robust as it doesn't depend on filename matching
-            if var_img_map and product_id:
-                img_to_vids = {}
-                for idx, src in var_img_map.items():
-                    if idx < len(created_variants):
-                        vid = created_variants[idx]["id"]
-                        img_to_vids.setdefault(src, []).append(vid)
-
-                import time
-                for src, vids in img_to_vids.items():
+            # 3. Associate images with variants using the real IDs
+            import time
+            for v_idx, img_idx in v_to_img_idx.items():
+                if v_idx < len(created_variants) and img_idx < len(created_images):
+                    vid = created_variants[v_idx]['id']
+                    iid = created_images[img_idx]['id']
+                    
                     _shopify_request(
-                        store, token, 'POST',
-                        f'products/{product_id}/images.json',
-                        {'image': {'src': src, 'variant_ids': vids}}
+                        store, token, 'PUT',
+                        f'variants/{vid}.json',
+                        {'variant': {'id': vid, 'image_id': iid}}
                     )
-                    time.sleep(0.5) # Prevent rate limits
+                    time.sleep(0.4) # Avoid hitting Shopify rate limits
 
             self._respond(201, {
                 'success': True,
