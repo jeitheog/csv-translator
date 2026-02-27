@@ -40,6 +40,12 @@ def _extract_filename(url):
 
 class handler(BaseHTTPRequestHandler):
 
+    def _norm_img(self, s):
+        if not s: return ""
+        s = s.strip()
+        if s.startswith("//"): s = "https:" + s
+        return s.split('?')[0] # Remove query params for stable comparison
+
     def do_POST(self):
         length = int(self.headers.get('Content-Length', 0))
         body = json.loads(self.rfile.read(length)) if length else {}
@@ -54,70 +60,58 @@ class handler(BaseHTTPRequestHandler):
             self._respond(400, {'error': 'Faltan campos: store, token, product'})
             return
 
-        # Strip _variant_image_src (custom field) from variants before sending to Shopify
-        variant_image_srcs = []
-        clean_variants = []
-        for v in (product.get('variants') or []):
-            img_src = v.pop('_variant_image_src', '') or ''
-            variant_image_srcs.append(img_src)
-            clean_variants.append(v)
-        product['variants'] = clean_variants
+        # Extract _variant_image_src from each variant
+        # Map variant_index to the ORIGINAL source URL
+        var_img_map = {}  # variant_index -> original_src
+        for i, variant in enumerate(product.get('variants', [])):
+            src = (variant.pop('_variant_image_src', '') or '').strip()
+            if src:
+                var_img_map[i] = src
+
+        # Deduplicate: remove variant images from product['images'] if they match (normalized)
+        variant_norm_keys = set(self._norm_img(s) for s in var_img_map.values())
+        if 'images' in product and variant_norm_keys:
+            product['images'] = [img for img in product['images']
+                                  if self._norm_img(img.get('src')) not in variant_norm_keys]
+            if not product['images']:
+                del product['images']
 
         status, data = _shopify_request(store, token, 'POST', 'products.json', {'product': product})
 
         if status == 201:
             created = data.get('product', {})
+            product_id = created.get('id')
+            created_variants = created.get('variants', [])
 
-            # After creation: link each variant to its specific image
-            self._link_variant_images(store, token, created, variant_image_srcs)
+            # Second pass: association by re-uploading with variant_ids
+            # This is slow but robust as it doesn't depend on filename matching
+            if var_img_map and product_id:
+                img_to_vids = {}
+                for idx, src in var_img_map.items():
+                    if idx < len(created_variants):
+                        vid = created_variants[idx]["id"]
+                        img_to_vids.setdefault(src, []).append(vid)
+
+                import time
+                for src, vids in img_to_vids.items():
+                    _shopify_request(
+                        store, token, 'POST',
+                        f'products/{product_id}/images.json',
+                        {'image': {'src': src, 'variant_ids': vids}}
+                    )
+                    time.sleep(0.5) # Prevent rate limits
 
             self._respond(201, {
                 'success': True,
                 'product': {
-                    'id': created.get('id'),
+                    'id': product_id,
                     'title': created.get('title'),
-                    'variants_count': len(created.get('variants', [])),
+                    'variants_count': len(created_variants),
                 },
             })
         else:
             error_msg = data.get('errors', data.get('error', 'Error al crear producto'))
             self._respond(status or 500, {'success': False, 'error': error_msg})
-
-    def _link_variant_images(self, store, token, created_product, variant_image_srcs):
-        """
-        Link each variant to its image by matching filenames between the original
-        scraped image URLs (_variant_image_src) and the created product's image URLs.
-        Shopify re-hosts images on its CDN, so we match by filename (not full URL).
-        """
-        if not any(variant_image_srcs):
-            return
-
-        created_images = created_product.get('images', [])
-        created_variants = created_product.get('variants', [])
-
-        # Build filename → image_id map from created images
-        filename_to_image_id = {}
-        for img in created_images:
-            fn = _extract_filename(img.get('src', ''))
-            if fn:
-                filename_to_image_id[fn] = img['id']
-
-        # For each variant, find its image by filename and update image_id
-        for created_v, img_src in zip(created_variants, variant_image_srcs):
-            if not img_src:
-                continue
-            fn = _extract_filename(img_src)
-            image_id = filename_to_image_id.get(fn)
-            if not image_id:
-                continue
-            variant_id = created_v.get('id')
-            if not variant_id:
-                continue
-            _shopify_request(
-                store, token, 'PUT',
-                f'variants/{variant_id}.json',
-                {'variant': {'id': variant_id, 'image_id': image_id}},
-            )
 
     def _respond(self, status, data):
         body = json.dumps(data, ensure_ascii=False).encode()
