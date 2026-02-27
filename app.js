@@ -1893,10 +1893,11 @@ function formatBytes(bytes) {
           lastSeenImg = pi;
           return pi;
         }
-        // Fallback to "last seen" for this product's variants (image fill-down)
-        if (lastSeenImg) return lastSeenImg;
-        // Final fallback to original object's image
-        return v.featured_image ? v.featured_image.src : '';
+        // Use the variant's own featured image from the scraped product (before fill-down)
+        // This avoids all variants inheriting the first variant's image via lastSeenImg
+        if (v.featured_image?.src) return v.featured_image.src;
+        // Last resort: fill-down (pure CSV imports without featured_image data)
+        return lastSeenImg;
       })();
       const variantImg = rawImg.startsWith('//') ? 'https:' + rawImg : rawImg;
 
