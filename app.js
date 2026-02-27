@@ -1600,15 +1600,23 @@ function formatBytes(bytes) {
 
       products = [];
       const seen = new Set();
+      let lastKey = '';
+
       for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
         const originalRow = state.rows[rowIndex];
         if (!originalRow) continue;
-        const key = getRowKey(originalRow);
-        const title = (titleIdx >= 0 ? rows[rowIndex][titleIdx] : '') || key; // rows[rowIndex] contains translated title
-        if (key && !seen.has(key)) {
-          seen.add(key);
-          // For manual CSV, we use the key as the identifier
-          products.push({ handle: key, title, fromCSV: true });
+
+        const h = handleIdx >= 0 ? (originalRow[handleIdx] || '').toString().trim() : '';
+        const t = titleIdx >= 0 ? (originalRow[titleIdx] || '').toString().trim() : '';
+        const currentKey = (h || t || '').toLowerCase();
+
+        if (currentKey) lastKey = currentKey;
+        if (!lastKey) continue;
+
+        if (!seen.has(lastKey)) {
+          seen.add(lastKey);
+          const title = (titleIdx >= 0 ? (rows[rowIndex][titleIdx] || '').toString().trim() : '') || lastKey;
+          products.push({ handle: lastKey, title, fromCSV: true });
         }
       }
     }
@@ -1735,14 +1743,22 @@ function formatBytes(bytes) {
 
     // For stable grouping (translation might change Title, but Handle/Identity should remain)
     // we use the original row corresponding to this translated row's index if possible.
-    const allProductRows = sourceRows.filter((r, idx) => {
-      const originalRow = state.rows[idx];
-      if (!originalRow) return false;
-      const h = handleIdx >= 0 ? (originalRow[handleIdx] || '').toString().trim() : '';
-      const t = titleIdx >= 0 ? (originalRow[titleIdx] || '').toString().trim() : '';
-      const key = (h || t || '').toLowerCase();
-      return key === (orig.handle || '').toLowerCase();
-    });
+    // Pre-calculate full keys for all rows to support variants without handles
+    const rowKeys = new Array(sourceRows.length);
+    let lastK = '';
+    for (let i = 0; i < sourceRows.length; i++) {
+      const origR = state.rows[i];
+      if (origR) {
+        const h = handleIdx >= 0 ? (origR[handleIdx] || '').toString().trim() : '';
+        const t = titleIdx >= 0 ? (origR[titleIdx] || '').toString().trim() : '';
+        const k = (h || t || '').toLowerCase();
+        if (k) lastK = k;
+      }
+      rowKeys[i] = lastK;
+    }
+
+    const targetKey = (orig.handle || '').toLowerCase();
+    const allProductRows = sourceRows.filter((r, idx) => rowKeys[idx] === targetKey);
 
     // If we're coming from a manual CSV, we need to reconstruct EVERYTHING from these rows
     if (orig.fromCSV) {

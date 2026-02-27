@@ -1465,194 +1465,199 @@ body {
     width: 100%;
     justify-content: center;
   }
-}/* ===== COLUMN SELECTION GRID ===== */
+}
+
+/* ===== COLUMN SELECTION GRID ===== */
 .config-label-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
 }
 
 .selection-counter {
-    font-size: 0.75rem;
-    color: var(--accent);
-    background: rgba(139, 92, 246, 0.1);
-    padding: 0.2rem 0.6rem;
-    border-radius: 999px;
-    font-weight: 600;
+  font-size: 0.75rem;
+  color: var(--accent);
+  background: rgba(139, 92, 246, 0.1);
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-weight: 600;
 }
 
 .columns-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 0.75rem;
-    margin: 1rem 0;
-    max-height: 250px;
-    overflow-y: auto;
-    padding: 0.5rem;
-    background: rgba(255, 255, 255, 0.02);
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0;
+  max-height: 250px;
+  overflow-y: auto;
+  padding: 0.5rem;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
 }
 
 .col-chip {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.75rem 1rem;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    font-size: 0.85rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all var(--transition);
-    user-select: none;
-    position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+  user-select: none;
+  position: relative;
 }
 
 .col-chip:hover {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.2);
-    transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-1px);
 }
 
 .col-chip.selected {
-    background: rgba(139, 92, 246, 0.1);
-    border-color: var(--accent);
-    color: white;
-    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.15);
+  background: rgba(139, 92, 246, 0.1);
+  border-color: var(--accent);
+  color: white;
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.15);
 }
 
 .col-chip input[type="radio"],
 .col-chip input[type="checkbox"] {
-    display: none;
+  display: none;
 }
 
 .col-chip .check {
-    width: 18px;
-    height: 18px;
-    border: 2px solid var(--border);
-    border-radius: 4px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.7rem;
-    color: transparent;
-    transition: all var(--transition);
-    flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  color: transparent;
+  transition: all var(--transition);
+  flex-shrink: 0;
 }
 
 .col-chip.selected .check {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: white;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
 }
 
 .col-chip.locked {
-    opacity: 0.6;
-    cursor: not-allowed;
-    background: rgba(255, 255, 255, 0.02);
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .columns-actions {
-    display: flex;
-    gap: 1.5rem;
-    margin-top: 0.5rem;
-}/* ===== ADMIN DASHBOARD ===== */
+  display: flex;
+  gap: 1.5rem;
+  margin-top: 0.5rem;
+}
+
+/* ===== ADMIN DASHBOARD ===== */
 .admin-stats-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1.5rem;
-    margin-top: 1.5rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  margin-top: 1.5rem;
 }
 
 .admin-stat-card {
-    background: rgba(139, 92, 246, 0.05);
-    border: 1px solid var(--border);
-    padding: 1.5rem;
-    border-radius: var(--radius-sm);
+  background: rgba(139, 92, 246, 0.05);
+  border: 1px solid var(--border);
+  padding: 1.5rem;
+  border-radius: var(--radius-sm);
 }
 
 .abuse-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
 }
 
 .abuse-card {
-    background: rgba(239, 68, 68, 0.05);
-    border: 1px solid rgba(239, 68, 68, 0.2);
-    padding: 1rem;
-    border-radius: var(--radius-sm);
-    display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
+  background: rgba(239, 68, 68, 0.05);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  padding: 1rem;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
 }
 
 .abuse-icon {
-    color: #ef4444;
-    font-size: 1.25rem;
+  color: #ef4444;
+  font-size: 1.25rem;
 }
 
 .abuse-content h4 {
-    font-size: 0.9rem;
-    margin-bottom: 0.25rem;
-    color: #fca5a5;
+  font-size: 0.9rem;
+  margin-bottom: 0.25rem;
+  color: #fca5a5;
 }
 
 .abuse-content p {
-    font-size: 0.8rem;
-    color: var(--text-muted);
+  font-size: 0.8rem;
+  color: var(--text-muted);
 }
 
 .badge-role {
-    font-size: 0.65rem;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-weight: 700;
-    text-transform: uppercase;
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .badge-role.admin {
-    background: #7c3aed;
-    color: white;
+  background: #7c3aed;
+  color: white;
 }
 
 .badge-role.user {
-    background: rgba(255, 255, 255, 0.1);
-    color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
 }
 
 .badge-status {
-    font-size: 0.7rem;
-    padding: 2px 8px;
-    border-radius: 10px;
-    font-weight: 600;
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
 }
 
 .badge-status.active {
-    background: #059669;
-    color: white;
+  background: #059669;
+  color: white;
 }
 
 .badge-status.banned {
-    background: #dc2626;
-    color: white;
+  background: #dc2626;
+  color: white;
 }
 
 .btn-sm {
-    padding: 4px 10px;
-    font-size: 0.75rem;
+  padding: 4px 10px;
+  font-size: 0.75rem;
 }
 
 .btn-text.danger {
-    color: #ef4444;
+  color: #ef4444;
 }
 
 .btn-text.danger:hover {
-    background: rgba(239, 68, 68, 0.1);
+  background: rgba(239, 68, 68, 0.1);
 }
+
 /* ===== ADMIN EXPANSION ===== */
 .admin-section-grid {
   display: grid;
@@ -1661,7 +1666,9 @@ body {
 }
 
 @media (max-width: 900px) {
-  .admin-section-grid { grid-template-columns: 1fr; }
+  .admin-section-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .logs-filter select {
@@ -1674,7 +1681,7 @@ body {
 }
 
 .faq-manager-item {
-  background: rgba(255,255,255,0.03);
+  background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border);
   padding: 1rem;
   border-radius: var(--radius-sm);
