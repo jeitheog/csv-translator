@@ -385,6 +385,10 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
         self._send_json_response(502, {"error": "No se pudo traducir"})
 
     # ─── Shopify scraper ─────────────────────────────────────
+    @staticmethod
+    def _get_store_base(parsed):
+        return f"{parsed.scheme}://{parsed.netloc}"
+
     def _handle_scraper(self):
         length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(length)) if length else {}
@@ -399,35 +403,48 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
 
         parsed = urllib.parse.urlparse(store_url)
         path = parsed.path.lower()
+        store_base = self._get_store_base(parsed)
+
+        print(f"[Scraper] Raw URL: {raw_url}")
+        print(f"[Scraper] Cleaned: {store_url} | Path: {path} | Base: {store_base}")
 
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "application/json",
         }
         all_products = []
         try:
+            # 1. Attempt Single Product if /products/ is in path
             if "/products/" in path:
-                # ── Single Product Mode ──────────────────────
                 parts = path.split("/")
                 try:
                     p_idx = next(i for i, part in enumerate(parts) if part == "products")
                     handle = parts[p_idx + 1]
-                    store_base = f"{parsed.scheme}://{parsed.netloc}"
+                    print(f"[Scraper] Detected product handle: {handle}")
                     
                     url = f"{store_base}/products/{handle}.json"
-                    req = urllib.request.Request(url, headers=headers)
-                    with urllib.request.urlopen(req, timeout=12) as resp:
-                        data = json.loads(resp.read().decode())
-                    p = data.get("product")
-                    if p:
-                        all_products = [p]
+                    print(f"[Scraper] Attempting direct fetch: {url}")
+                    try:
+                        req = urllib.request.Request(url, headers=headers)
+                        with urllib.request.urlopen(req, timeout=10) as resp:
+                            data = json.loads(resp.read().decode())
+                        p = data.get("product")
+                        if p:
+                            all_products = [p]
+                            print(f"[Scraper] Success: Found '{p.get('title')}' via direct JSON")
+                    except Exception as e:
+                        print(f"[Scraper] Direct JSON failed: {str(e)}. Falling back to full store fetch filtered by handle.")
                 except (ValueError, IndexError, StopIteration):
-                    pass
+                    print("[Scraper] Could not extract handle from path parts.")
 
+            # 2. Full Store Search (if not found or not a single product URL)
             if not all_products:
-                # ── Full Store Mode ──────────────────────────
-                store_base = f"{parsed.scheme}://{parsed.netloc}"
+                print(f"[Scraper] Fetching all products from: {store_base}/products.json")
                 page = 1
+                target_handle = None
+                if "/products/" in path:
+                    target_handle = path.split("/products/")[1].split("/")[0].split("?")[0]
+
                 while True:
                     url = f"{store_base}/products.json?limit=250&page={page}"
                     req = urllib.request.Request(url, headers=headers)
@@ -436,16 +453,31 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
                     products = data.get("products", [])
                     if not products:
                         break
-                    all_products.extend(products)
+                    
+                    if target_handle:
+                        # If we are looking for a specific product, check if it's in this page
+                        p = next((x for x in products if x.get('handle') == target_handle), None)
+                        if p:
+                            all_products = [p]
+                            print(f"[Scraper] Success: Found '{p.get('title')}' in full products list")
+                            break
+                    else:
+                        all_products.extend(products)
+
                     if len(products) < 250 or page >= 20:
                         break
                     page += 1
         except urllib.error.HTTPError as e:
-            self._send_json_response(e.code, {"error": f"La tienda devolvió error {e.code}"})
+            msg = f"Error {e.code} de la tienda"
+            print(f"[Scraper] HTTP Error: {e.code}")
+            self._send_json_response(e.code, {"error": msg})
             return
         except Exception as e:
-            self._send_json_response(502, {"error": f"No se pudo conectar: {str(e)}"})
+            print(f"[Scraper] Global Error: {str(e)}")
+            self._send_json_response(502, {"error": f"Fallo de conexión: {str(e)}"})
             return
+
+        print(f"[Scraper] Done. Found {len(all_products)} product(s).")
         self._send_json_response(200, {"products": all_products, "total": len(all_products)})
 
     # ─── AI Tag/Enrichment proxy ─────────────────────────────

@@ -39,34 +39,34 @@ class handler(BaseHTTPRequestHandler):
         store_url = _clean_url(raw_url)
         parsed = urllib.parse.urlparse(store_url)
         path = parsed.path.lower()
+        store_base = f"{parsed.scheme}://{parsed.netloc}"
 
         all_products = []
         try:
+            target_handle = None
             if "/products/" in path:
                 # ── Single Product Mode ──────────────────────
-                # Find the product handle from the URL
                 parts = path.split("/")
                 try:
                     p_idx = next(i for i, part in enumerate(parts) if part == "products")
-                    handle = parts[p_idx + 1]
-                    # Base store URL (e.g., https://store.com)
-                    store_base = f"{parsed.scheme}://{parsed.netloc}"
+                    target_handle = parts[p_idx + 1]
                     
-                    url = f"{store_base}/products/{handle}.json"
-                    req = urllib.request.Request(url, headers=HEADERS)
-                    with urllib.request.urlopen(req, timeout=12) as resp:
-                        data = json.loads(resp.read().decode())
-                    p = data.get("product")
-                    if p:
-                        all_products = [p]
+                    # A. Direct fetch attempt
+                    url = f"{store_base}/products/{target_handle}.json"
+                    try:
+                        req = urllib.request.Request(url, headers=HEADERS)
+                        with urllib.request.urlopen(req, timeout=10) as resp:
+                            data = json.loads(resp.read().decode())
+                        p = data.get("product")
+                        if p:
+                            all_products = [p]
+                    except Exception:
+                        pass # Fallback to full store fetch below
                 except (ValueError, IndexError, StopIteration):
-                    # Fallback if URL structure doesn't match standard Shopify product URL
                     pass
 
-            # ── Full Store Mode (Fallback or Default) ────────
+            # ── Full Store Mode (Default or Fallback) ────────
             if not all_products:
-                # If it's a shop root or we couldn't find a single product handle
-                store_base = f"{parsed.scheme}://{parsed.netloc}"
                 page = 1
                 while True:
                     url = f"{store_base}/products.json?limit=250&page={page}"
@@ -76,16 +76,25 @@ class handler(BaseHTTPRequestHandler):
                     products = data.get("products", [])
                     if not products:
                         break
-                    all_products.extend(products)
+                    
+                    if target_handle:
+                        # Looking for specific product in the list
+                        p = next((x for x in products if x.get('handle') == target_handle), None)
+                        if p:
+                            all_products = [p]
+                            break
+                    else:
+                        all_products.extend(products)
+
                     if len(products) < 250 or page >= 20: 
                         break
                     page += 1
 
         except urllib.error.HTTPError as e:
-            self._respond(e.code, {"error": f"La tienda devolvió error {e.code}. Asegúrate de que sea una tienda Shopify pública."})
+            self._respond(e.code, {"error": f"La tienda devolvió error {e.code}. Asegúrate de que sea pública."})
             return
         except Exception as e:
-            self._respond(502, {"error": f"No se pudo conectar a la tienda: {str(e)}"})
+            self._respond(502, {"error": f"Error de conexión: {str(e)}"})
             return
 
         self._respond(200, {"products": all_products, "total": len(all_products)})
