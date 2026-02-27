@@ -1881,22 +1881,23 @@ function formatBytes(bytes) {
       const translOpt3 = opt3ValIdx >= 0 ? (row[opt3ValIdx] || '').trim() : '';
 
       const rawImg = (() => {
-        // Try Variant Image column first
+        // Scraped products: featured_image is the authoritative Shopify source.
+        // It must come FIRST — CSV columns only contain the main product image
+        // (fill-down) and would wrongly override per-variant images.
+        if (v.featured_image?.src) return v.featured_image.src;
+
+        // CSV-only path (no featured_image): try Variant Image column
         const vi = variantImgIdx >= 0 ? (row[variantImgIdx] || '').toString().trim() : '';
         if (vi && (vi.startsWith('http') || vi.startsWith('//'))) {
           lastSeenImg = vi;
           return vi;
         }
-        // Then Image Src column
+        // Then Image Src column (with fill-down for Shopify CSV format)
         const pi = imgIdx >= 0 ? (row[imgIdx] || '').toString().trim() : '';
         if (pi && (pi.startsWith('http') || pi.startsWith('//'))) {
           lastSeenImg = pi;
           return pi;
         }
-        // Use the variant's own featured image from the scraped product (before fill-down)
-        // This avoids all variants inheriting the first variant's image via lastSeenImg
-        if (v.featured_image?.src) return v.featured_image.src;
-        // Last resort: fill-down (pure CSV imports without featured_image data)
         return lastSeenImg;
       })();
       const variantImg = rawImg.startsWith('//') ? 'https:' + rawImg : rawImg;
