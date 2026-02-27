@@ -1754,13 +1754,22 @@ function formatBytes(bytes) {
       const tags = (tagsIdx >= 0 ? (firstWithData[tagsIdx] || '') : '').toString().trim();
 
       // Variants
+      let lastSeenImg = '';
       const variants = allProductRows
         .filter(r => (r[priceIdx] || '').toString().trim() !== '' || (r[skuIdx] || '').toString().trim() !== '' || (r[opt1ValIdx] || '').toString().trim() !== '')
         .map(r => {
           const rawImg = (() => {
             const vi = variantImgIdx >= 0 ? (r[variantImgIdx] || '').toString().trim() : '';
-            if (vi) return vi;
-            return imgIdx >= 0 ? (r[imgIdx] || '').toString().trim() : '';
+            if (vi && (vi.startsWith('http') || vi.startsWith('//'))) {
+              lastSeenImg = vi;
+              return vi;
+            }
+            const pi = imgIdx >= 0 ? (r[imgIdx] || '').toString().trim() : '';
+            if (pi && (pi.startsWith('http') || pi.startsWith('//'))) {
+              lastSeenImg = pi;
+              return pi;
+            }
+            return lastSeenImg;
           })();
           const variantImg = rawImg.startsWith('//') ? 'https:' + rawImg : rawImg;
 
@@ -1848,6 +1857,7 @@ function formatBytes(bytes) {
       return { name, values: values && values.length ? values : opt.values };
     });
 
+    let lastSeenImg = '';
     const variants = (orig.variants || []).map((v, i) => {
       const row = variantRows[i] || [];
       const translOpt1 = opt1ValIdx >= 0 ? (row[opt1ValIdx] || '').trim() : '';
@@ -1855,10 +1865,21 @@ function formatBytes(bytes) {
       const translOpt3 = opt3ValIdx >= 0 ? (row[opt3ValIdx] || '').trim() : '';
 
       const rawImg = (() => {
+        // Try Variant Image column first
         const vi = variantImgIdx >= 0 ? (row[variantImgIdx] || '').toString().trim() : '';
-        if (vi && (vi.startsWith('http') || vi.startsWith('//'))) return vi;
+        if (vi && (vi.startsWith('http') || vi.startsWith('//'))) {
+          lastSeenImg = vi;
+          return vi;
+        }
+        // Then Image Src column
         const pi = imgIdx >= 0 ? (row[imgIdx] || '').toString().trim() : '';
-        if (pi && (pi.startsWith('http') || pi.startsWith('//'))) return pi;
+        if (pi && (pi.startsWith('http') || pi.startsWith('//'))) {
+          lastSeenImg = pi;
+          return pi;
+        }
+        // Fallback to "last seen" for this product's variants (image fill-down)
+        if (lastSeenImg) return lastSeenImg;
+        // Final fallback to original object's image
         return v.featured_image ? v.featured_image.src : '';
       })();
       const variantImg = rawImg.startsWith('//') ? 'https:' + rawImg : rawImg;

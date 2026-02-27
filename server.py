@@ -287,11 +287,17 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
         if not store.endswith(".myshopify.com"):
             store = store + ".myshopify.com"
 
+        def _norm_img(s):
+            if not s: return ""
+            s = s.strip()
+            if s.startswith("//"): s = "https:" + s
+            return s.split('?')[0] # Remove query params for stable comparison
+
         # Extract _variant_image_src from each variant before sending to Shopify
         # (Shopify ignores unknown fields; we handle images in a second pass)
         var_img_map = {}  # variant_index → img_src
         for i, variant in enumerate(product.get('variants', [])):
-            src = variant.pop('_variant_image_src', '') or ''
+            src = _norm_img(variant.pop('_variant_image_src', '') or '')
             if src:
                 var_img_map[i] = src
 
@@ -299,7 +305,7 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
         variant_img_srcs = set(var_img_map.values())
         if 'images' in product and variant_img_srcs:
             product['images'] = [img for img in product['images']
-                                  if img.get('src') not in variant_img_srcs]
+                                  if _norm_img(img.get('src')) not in variant_img_srcs]
             if not product['images']:
                 del product['images']
 
