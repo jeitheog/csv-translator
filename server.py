@@ -392,28 +392,54 @@ class CSVTraductorHandler(http.server.SimpleHTTPRequestHandler):
         if not raw_url:
             self._send_json_response(400, {"error": "Falta la URL de la tienda"})
             return
+
         store_url = raw_url.rstrip("/")
         if not store_url.startswith("http"):
             store_url = "https://" + store_url
+
+        parsed = urllib.parse.urlparse(store_url)
+        path = parsed.path.lower()
+
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept": "application/json",
         }
         all_products = []
-        page = 1
         try:
-            while True:
-                url = f"{store_url}/products.json?limit=250&page={page}"
-                req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=12) as resp:
-                    data = json.loads(resp.read().decode())
-                products = data.get("products", [])
-                if not products:
-                    break
-                all_products.extend(products)
-                if len(products) < 250 or page >= 20:
-                    break
-                page += 1
+            if "/products/" in path:
+                # ── Single Product Mode ──────────────────────
+                parts = path.split("/")
+                try:
+                    p_idx = next(i for i, part in enumerate(parts) if part == "products")
+                    handle = parts[p_idx + 1]
+                    store_base = f"{parsed.scheme}://{parsed.netloc}"
+                    
+                    url = f"{store_base}/products/{handle}.json"
+                    req = urllib.request.Request(url, headers=headers)
+                    with urllib.request.urlopen(req, timeout=12) as resp:
+                        data = json.loads(resp.read().decode())
+                    p = data.get("product")
+                    if p:
+                        all_products = [p]
+                except (ValueError, IndexError, StopIteration):
+                    pass
+
+            if not all_products:
+                # ── Full Store Mode ──────────────────────────
+                store_base = f"{parsed.scheme}://{parsed.netloc}"
+                page = 1
+                while True:
+                    url = f"{store_base}/products.json?limit=250&page={page}"
+                    req = urllib.request.Request(url, headers=headers)
+                    with urllib.request.urlopen(req, timeout=12) as resp:
+                        data = json.loads(resp.read().decode())
+                    products = data.get("products", [])
+                    if not products:
+                        break
+                    all_products.extend(products)
+                    if len(products) < 250 or page >= 20:
+                        break
+                    page += 1
         except urllib.error.HTTPError as e:
             self._send_json_response(e.code, {"error": f"La tienda devolvió error {e.code}"})
             return

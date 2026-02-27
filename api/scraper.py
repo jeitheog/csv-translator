@@ -37,20 +37,50 @@ class handler(BaseHTTPRequestHandler):
             return
 
         store_url = _clean_url(raw_url)
+        parsed = urllib.parse.urlparse(store_url)
+        path = parsed.path.lower()
 
         all_products = []
-        page = 1
         try:
-            while True:
-                products = _fetch_page(store_url, page)
-                if not products:
-                    break
-                all_products.extend(products)
-                if len(products) < 250:
-                    break
-                page += 1
-                if page > 20:   # safety cap: 5000 products max
-                    break
+            if "/products/" in path:
+                # ── Single Product Mode ──────────────────────
+                # Find the product handle from the URL
+                parts = path.split("/")
+                try:
+                    p_idx = next(i for i, part in enumerate(parts) if part == "products")
+                    handle = parts[p_idx + 1]
+                    # Base store URL (e.g., https://store.com)
+                    store_base = f"{parsed.scheme}://{parsed.netloc}"
+                    
+                    url = f"{store_base}/products/{handle}.json"
+                    req = urllib.request.Request(url, headers=HEADERS)
+                    with urllib.request.urlopen(req, timeout=12) as resp:
+                        data = json.loads(resp.read().decode())
+                    p = data.get("product")
+                    if p:
+                        all_products = [p]
+                except (ValueError, IndexError, StopIteration):
+                    # Fallback if URL structure doesn't match standard Shopify product URL
+                    pass
+
+            # ── Full Store Mode (Fallback or Default) ────────
+            if not all_products:
+                # If it's a shop root or we couldn't find a single product handle
+                store_base = f"{parsed.scheme}://{parsed.netloc}"
+                page = 1
+                while True:
+                    url = f"{store_base}/products.json?limit=250&page={page}"
+                    req = urllib.request.Request(url, headers=HEADERS)
+                    with urllib.request.urlopen(req, timeout=12) as resp:
+                        data = json.loads(resp.read().decode())
+                    products = data.get("products", [])
+                    if not products:
+                        break
+                    all_products.extend(products)
+                    if len(products) < 250 or page >= 20: 
+                        break
+                    page += 1
+
         except urllib.error.HTTPError as e:
             self._respond(e.code, {"error": f"La tienda devolvió error {e.code}. Asegúrate de que sea una tienda Shopify pública."})
             return
