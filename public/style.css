@@ -1804,3 +1804,127 @@ body {
 .shopify-import-panel {
   margin-top: 8px;
 }
+
+/* ===== EMAIL GATE ===== */
+.app-content-hidden {
+  display: none;
+}
+.app-content-visible {
+  display: block;
+}
+
+.email-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.email-gate-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: 24px;
+  padding: 48px 40px;
+  max-width: 440px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 0 80px rgba(139, 92, 246, 0.15), 0 24px 60px rgba(0,0,0,0.5);
+  animation: gateIn 0.4s cubic-bezier(0.16,1,0.3,1);
+}
+
+@keyframes gateIn {
+  from { opacity: 0; transform: translateY(24px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.email-gate-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 28px;
+}
+.email-gate-logo .logo-icon { font-size: 28px; }
+.email-gate-logo .logo-text { font-size: 22px; font-weight: 700; color: #e8eaf0; letter-spacing: -0.5px; }
+.email-gate-logo .accent { color: var(--accent); }
+
+.email-gate-title {
+  font-size: 26px;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 12px;
+  letter-spacing: -0.5px;
+}
+
+.email-gate-sub {
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin-bottom: 28px;
+}
+
+.email-gate-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.email-gate-input-wrap {
+  position: relative;
+}
+
+.email-gate-input {
+  width: 100%;
+  background: rgba(255,255,255,0.06);
+  border: 1.5px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 15px;
+  color: #e8eaf0;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  font-family: inherit;
+}
+.email-gate-input::placeholder { color: #6b7280; }
+.email-gate-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(139,92,246,0.2);
+}
+
+.email-gate-btn {
+  width: 100%;
+  padding: 14px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--accent), #6366f1);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+  box-shadow: 0 4px 20px rgba(139,92,246,0.4);
+}
+.email-gate-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 28px rgba(139,92,246,0.55);
+}
+.email-gate-btn:active { transform: translateY(0); }
+.email-gate-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+.email-gate-error {
+  font-size: 12px;
+  color: #f87171;
+  margin-top: -4px;
+}
+.email-gate-error.hidden { display: none; }
+
+.email-gate-legal {
+  font-size: 11px;
+  color: #4b5563;
+  margin-top: 16px;
+  line-height: 1.5;
+}

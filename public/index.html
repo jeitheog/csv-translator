@@ -22,6 +22,37 @@
 </head>
 
 <body>
+
+  <!-- ── Email Gate ── -->
+  <div id="emailGate" class="email-gate">
+    <div class="email-gate-card">
+      <div class="email-gate-logo">
+        <span class="logo-icon">🌐</span>
+        <span class="logo-text">CSV<span class="accent">Español</span></span>
+      </div>
+      <h2 class="email-gate-title">Acceso gratuito</h2>
+      <p class="email-gate-sub">Introduce tu correo para usar la herramienta de traducción de CSV al español. Sin spam, solo actualizaciones importantes.</p>
+      <form id="emailGateForm" class="email-gate-form" novalidate>
+        <div class="email-gate-input-wrap">
+          <input
+            type="email"
+            id="emailGateInput"
+            class="email-gate-input"
+            placeholder="tucorreo@ejemplo.com"
+            autocomplete="email"
+            required
+          />
+        </div>
+        <button type="submit" class="btn btn-primary email-gate-btn" id="emailGateBtn">
+          Acceder gratis →
+        </button>
+        <p id="emailGateError" class="email-gate-error hidden">Introduce un correo electrónico válido.</p>
+      </form>
+      <p class="email-gate-legal">Sin spam. Puedes darte de baja cuando quieras.</p>
+    </div>
+  </div>
+
+  <div id="appContent" class="app-content-hidden">
   <div class="bg-orbs">
     <div class="orb orb-1"></div>
     <div class="orb orb-2"></div>
@@ -295,6 +326,8 @@
       document.body.appendChild(s);
     })();
   </script>
+
+  </div><!-- /appContent -->
 
 </body>
 
