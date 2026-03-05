@@ -2,62 +2,6 @@
    CSV Traductor al Español — app.js
    ============================================================ */
 
-// ── Email Gate ─────────────────────────────────────────────
-const EMAIL_KEY = 'csvtool_user_email';
-
-function isValidEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-}
-
-async function submitEmail(email) {
-  try {
-    await fetch('/api/collect-email', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email.trim().toLowerCase() })
-    });
-  } catch (_) { /* silent — don't block user if webhook fails */ }
-}
-
-function unlockApp() {
-  const gate = document.getElementById('emailGate');
-  const app  = document.getElementById('appContent');
-  if (gate) gate.style.display = 'none';
-  if (app)  { app.classList.remove('app-content-hidden'); app.classList.add('app-content-visible'); }
-}
-
-function initEmailGate() {
-  const saved = localStorage.getItem(EMAIL_KEY);
-  if (saved) { unlockApp(); return; }
-
-  const form  = document.getElementById('emailGateForm');
-  const input = document.getElementById('emailGateInput');
-  const btn   = document.getElementById('emailGateBtn');
-  const error = document.getElementById('emailGateError');
-
-  form.addEventListener('submit', async e => {
-    e.preventDefault();
-    const email = input.value.trim();
-
-    if (!isValidEmail(email)) {
-      error.classList.remove('hidden');
-      input.focus();
-      return;
-    }
-    error.classList.add('hidden');
-    btn.disabled = true;
-    btn.textContent = 'Accediendo...';
-
-    await submitEmail(email);
-    localStorage.setItem(EMAIL_KEY, email);
-    unlockApp();
-  });
-
-  input.addEventListener('input', () => error.classList.add('hidden'));
-}
-
-document.addEventListener('DOMContentLoaded', initEmailGate);
-
 // ── State ──────────────────────────────────────────────────
 const state = {
   rawText: '',
