@@ -1,5 +1,4 @@
 import json
-import os
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler
@@ -34,7 +33,11 @@ def _shopify_request(store, token, method, endpoint, data=None):
 class handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
-        length = int(self.headers.get('Content-Length', 0))
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+        except (ValueError, TypeError):
+            self._respond(400, {'error': 'Content-Length inválido'})
+            return
         body = json.loads(self.rfile.read(length)) if length else {}
 
         if 'store' not in body or 'token' not in body:

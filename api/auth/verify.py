@@ -25,6 +25,8 @@ def _verify_token(token):
     try:
         payload_b64, sig = token.rsplit('.', 1)
         secret = os.environ.get('SECRET_KEY', '')
+        if not secret:
+            return None
         expected = hmac_mod.new(secret.encode(), payload_b64.encode(), hashlib.sha256).hexdigest()
         if not hmac_mod.compare_digest(sig, expected):
             return None

@@ -331,9 +331,9 @@ function showProductSelect(products, fromManualCSV = false) {
     card.dataset.title = p.title.toLowerCase();
     card.innerHTML = `
       <input type="checkbox" checked />
-      ${img ? `<img src="${img}" alt="${p.title}" loading="lazy" />` : '<div style="width:100%;aspect-ratio:1;background:rgba(255,255,255,0.08);border-radius:8px;"></div>'}
-      <p class="product-title">${p.title}</p>
-      <p class="product-price">${price}</p>
+      ${img ? `<img src="${escapeHtml(img)}" alt="${escapeHtml(p.title)}" loading="lazy" />` : '<div style="width:100%;aspect-ratio:1;background:rgba(255,255,255,0.08);border-radius:8px;"></div>'}
+      <p class="product-title">${escapeHtml(p.title)}</p>
+      <p class="product-price">${escapeHtml(price)}</p>
     `;
     card.addEventListener('click', () => {
       const cb = card.querySelector('input[type="checkbox"]');

@@ -1,8 +1,19 @@
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler
+
+MAX_BODY_BYTES = 100_000  # 100 KB max per request
+ALLOWED_LANGS = {
+    'auto', 'en', 'de', 'nl', 'fr', 'it', 'pt', 'zh', 'tr', 'ru', 'ja',
+    'es', 'ko', 'ar', 'pl', 'sv', 'da', 'fi', 'nb', 'cs', 'hu', 'ro',
+}
+
+
+def _valid_lang(code):
+    return bool(re.fullmatch(r'[a-z]{2,5}(-[A-Z]{2})?', code)) and code in ALLOWED_LANGS
 
 
 def _google_translate(text, sl, tl):
@@ -40,15 +51,31 @@ def _mymemory_translate(text, sl, tl):
 class handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
-        length = int(self.headers.get("Content-Length", 0))
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (ValueError, TypeError):
+            self._respond(400, {"error": "Content-Length inválido"})
+            return
+
+        if length > MAX_BODY_BYTES:
+            self._respond(413, {"error": "Payload demasiado grande (máx 100 KB)"})
+            return
+
         body = json.loads(self.rfile.read(length)) if length else {}
 
         text = body.get("text", "").strip()
-        sl = body.get("sl", "auto").strip() or "auto"
+        sl = (body.get("sl", "auto") or "auto").strip()
         tl = body.get("tl", "").strip()
 
-        if not text or not tl:
-            self._respond(400, {"error": "Faltan campos: text, tl"})
+        if sl != "auto" and not _valid_lang(sl):
+            self._respond(400, {"error": f"Idioma de origen no válido: {sl}"})
+            return
+        if not tl or not _valid_lang(tl):
+            self._respond(400, {"error": f"Idioma de destino no válido: {tl}"})
+            return
+
+        if not text:
+            self._respond(400, {"error": "Falta el campo: text"})
             return
 
         # Try Google Translate first (server-side, no CORS issues)

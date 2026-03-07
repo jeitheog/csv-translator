@@ -37,7 +37,12 @@ def _create_token(email, role, ttl=86400):
 class handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
-        length = int(self.headers.get('Content-Length', 0))
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+        except (ValueError, TypeError):
+            self._respond(400, {'success': False, 'error': 'Content-Length inválido'})
+            return
+
         body = json.loads(self.rfile.read(length)) if length else {}
 
         email = body.get('email', '').strip().lower()
@@ -46,8 +51,9 @@ class handler(BaseHTTPRequestHandler):
         admin_email = os.environ.get('ADMIN_EMAIL', '').strip().lower()
         admin_hash = os.environ.get('ADMIN_PASSWORD_HASH', '')
         admin_salt = os.environ.get('ADMIN_SALT', '')
+        secret_key = os.environ.get('SECRET_KEY', '')
 
-        if not admin_email or not admin_hash or not admin_salt:
+        if not admin_email or not admin_hash or not admin_salt or not secret_key:
             self._respond(500, {'success': False, 'error': 'Servidor no configurado'})
             return
 
