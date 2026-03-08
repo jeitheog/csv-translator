@@ -443,7 +443,10 @@ function productsToCSV(products) {
 
     variants.forEach((v, i) => {
       const isFirst = i === 0;
-      const variantImgSrc = v.featured_image ? (v.featured_image.src || '') : '';
+      // Prefer featured_image; fall back to searching product.images by variant_ids
+      const variantImgSrc = v.featured_image
+        ? (v.featured_image.src || '')
+        : (images.find(img => Array.isArray(img.variant_ids) && img.variant_ids.includes(v.id))?.src || '');
 
       rows.push([
         p.handle,
@@ -1859,7 +1862,12 @@ function formatBytes(bytes) {
         if (vi && (vi.startsWith('http') || vi.startsWith('//'))) return vi;
         const pi = imgIdx >= 0 ? (row[imgIdx] || '').toString().trim() : '';
         if (pi && (pi.startsWith('http') || pi.startsWith('//'))) return pi;
-        return v.featured_image ? v.featured_image.src : '';
+        if (v.featured_image) return v.featured_image.src;
+        // Fallback: search orig.images for an image linked to this variant via variant_ids
+        const fromList = (orig.images || []).find(img =>
+          Array.isArray(img.variant_ids) && img.variant_ids.includes(v.id)
+        );
+        return fromList ? fromList.src : '';
       })();
       const variantImg = rawImg.startsWith('//') ? 'https:' + rawImg : rawImg;
 

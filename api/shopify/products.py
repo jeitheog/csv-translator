@@ -1,4 +1,5 @@
 import json
+import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler
@@ -30,97 +31,115 @@ def _shopify_request(store, token, method, endpoint, data=None):
         return 0, {"error": f"No se pudo conectar a Shopify: {str(e.reason)}"}
 
 
-def _extract_filename(url):
-    """Extract lowercase filename (without query params) from a URL."""
-    try:
-        return url.split('?')[0].rstrip('/').split('/')[-1].lower()
-    except Exception:
-        return ''
+def _norm(s):
+    """Normalize a CDN URL for matching: strip query params and lowercase."""
+    if not s:
+        return ""
+    s = s.strip()
+    if s.startswith("//"):
+        s = "https:" + s
+    return s.split("?")[0].lower()
 
 
 class handler(BaseHTTPRequestHandler):
 
-    def _norm(self, s):
-        if not s: return ""
-        s = s.strip()
-        if s.startswith("//"): s = "https:" + s
-        return s.split('?')[0].lower()
-
     def do_POST(self):
-        length = int(self.headers.get('Content-Length', 0))
+        length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(length)) if length else {}
 
-        store = body.get('store', '').strip().replace('https://', '').replace('http://', '').rstrip('/')
-        if not store.endswith('.myshopify.com'):
-            store += '.myshopify.com'
-        token = body.get('token', '').strip()
-        product = body.get('product')
+        store = body.get("store", "").strip().replace("https://", "").replace("http://", "").rstrip("/")
+        if not store.endswith(".myshopify.com"):
+            store += ".myshopify.com"
+        token = body.get("token", "").strip()
+        product = body.get("product")
 
         if not store or not token or not product:
-            self._respond(400, {'error': 'Faltan campos: store, token, product'})
+            self._respond(400, {"error": "Faltan campos: store, token, product"})
             return
 
-        # 1. Map each variant to an image index based on its _variant_image_src
-        images_list = product.get('images', [])
-        image_norm_map = {self._norm(img.get('src')): i for i, img in enumerate(images_list)}
-        
-        # variant_index -> image_index
-        v_to_img_idx = {}
-        for i, v in enumerate(product.get('variants', [])):
-            src = v.pop('_variant_image_src', '')
-            if src:
-                norm_src = self._norm(src)
-                if norm_src in image_norm_map:
-                    v_to_img_idx[i] = image_norm_map[norm_src]
-                else:
-                    # If variant image is not in gallery, add it to have an ID
-                    new_idx = len(images_list)
-                    images_list.append({'src': src})
-                    image_norm_map[norm_src] = new_idx
-                    v_to_img_idx[i] = new_idx
-        
-        product['images'] = images_list
+        # ── Step 1: extract _variant_image_src from each variant ──────────────
+        images_list = product.get("images", []) or []
+        variants_list = product.get("variants", []) or []
 
-        # 2. Create the product
-        status, data = _shopify_request(store, token, 'POST', 'products.json', {'product': product})
+        # Build norm→index map from the images we're about to send
+        img_norm_map = {}
+        for i, img in enumerate(images_list):
+            n = _norm(img.get("src", ""))
+            if n and n not in img_norm_map:
+                img_norm_map[n] = i
 
-        if status == 201:
-            created = data.get('product', {})
-            product_id = created.get('id')
-            created_images = created.get('images', [])
-            created_variants = created.get('variants', [])
+        # For each variant, pop its private field and record which image index
+        # it should be linked to.  If the image isn't in our list yet, add it.
+        # We also build the reverse map: image_index → [variant_indices]
+        img_to_variant_indices = {}   # image list index → [variant list indices]
+        for vi, v in enumerate(variants_list):
+            src = v.pop("_variant_image_src", "") or ""
+            if not src:
+                continue
+            n = _norm(src)
+            if not n:
+                continue
+            if n not in img_norm_map:
+                # Not in gallery yet — append it
+                new_idx = len(images_list)
+                images_list.append({"src": src})
+                img_norm_map[n] = new_idx
+            img_idx = img_norm_map[n]
+            img_to_variant_indices.setdefault(img_idx, []).append(vi)
 
-            # 3. Associate images with variants using the real IDs
-            import time
-            for v_idx, img_idx in v_to_img_idx.items():
-                if v_idx < len(created_variants) and img_idx < len(created_images):
-                    vid = created_variants[v_idx]['id']
-                    iid = created_images[img_idx]['id']
-                    
-                    _shopify_request(
-                        store, token, 'PUT',
-                        f'variants/{vid}.json',
-                        {'variant': {'id': vid, 'image_id': iid}}
-                    )
-                    time.sleep(0.4) # Avoid hitting Shopify rate limits
+        product["images"] = images_list
 
-            self._respond(201, {
-                'success': True,
-                'product': {
-                    'id': product_id,
-                    'title': created.get('title'),
-                    'variants_count': len(created_variants),
-                },
-            })
-        else:
-            error_msg = data.get('errors', data.get('error', 'Error al crear producto'))
-            self._respond(status or 500, {'success': False, 'error': error_msg})
+        # ── Step 2: create the product ─────────────────────────────────────────
+        status, data = _shopify_request(store, token, "POST", "products.json", {"product": product})
+
+        if status != 201:
+            error_msg = data.get("errors", data.get("error", "Error al crear producto"))
+            self._respond(status or 500, {"success": False, "error": error_msg})
+            return
+
+        created = data.get("product", {})
+        product_id = created.get("id")
+        created_images   = sorted(created.get("images", []), key=lambda img: img.get("position", 0))
+        created_variants = created.get("variants", [])
+
+        # ── Step 3: associate images with variants using variant_ids ───────────
+        # For each colour image, do ONE PUT to update image.variant_ids.
+        # This is the recommended Shopify API approach — fewer calls, more reliable.
+        for img_idx, variant_indices in img_to_variant_indices.items():
+            if img_idx >= len(created_images):
+                continue
+            image_id = created_images[img_idx]["id"]
+
+            # Resolve variant IDs
+            variant_ids = []
+            for vi in variant_indices:
+                if vi < len(created_variants):
+                    variant_ids.append(created_variants[vi]["id"])
+
+            if not variant_ids:
+                continue
+
+            _shopify_request(
+                store, token, "PUT",
+                f"products/{product_id}/images/{image_id}.json",
+                {"image": {"id": image_id, "variant_ids": variant_ids}},
+            )
+            time.sleep(0.3)   # Respect Shopify rate limits
+
+        self._respond(201, {
+            "success": True,
+            "product": {
+                "id": product_id,
+                "title": created.get("title"),
+                "variants_count": len(created_variants),
+            },
+        })
 
     def _respond(self, status, data):
         body = json.dumps(data, ensure_ascii=False).encode()
         self.send_response(status)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Content-Length', len(body))
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", len(body))
         self.end_headers()
         self.wfile.write(body)
 
