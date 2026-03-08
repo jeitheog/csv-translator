@@ -1681,7 +1681,7 @@ function formatBytes(bytes) {
           logItem.style.color = '#4ade80';
           ok++;
         } else {
-          logItem.textContent = `❌ (${i + 1}/${products.length}) ${orig.title}: ${JSON.stringify(data.error)}`;
+          logItem.textContent = `❌ (${i + 1}/${products.length}) ${orig.title}: ${typeof data.error === 'object' ? JSON.stringify(data.error) : (data.error || 'Error desconocido')}`;
           logItem.style.color = '#f87171';
           fail++;
         }
@@ -1976,7 +1976,7 @@ function formatBytes(bytes) {
         if (importBtn) importBtn.disabled = false;
         setTimeout(() => oauthStatus && oauthStatus.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200);
       } else {
-        setStatus(`❌ ${d.error || 'Error de autorización'}`, '#f87171');
+        setStatus(`❌ ${typeof d.error === 'object' ? JSON.stringify(d.error) : (d.error || 'Error de autorización')}`, '#f87171');
       }
     } catch (_) {}
   }
@@ -2021,7 +2021,7 @@ function formatBytes(bytes) {
       const data   = await res.json();
 
       if (!data.auth_url) {
-        setStatus(`❌ ${data.error || 'Error al generar URL'}`, '#f87171');
+        setStatus(`❌ ${typeof data.error === 'object' ? JSON.stringify(data.error) : (data.error || 'Error al generar URL')}`, '#f87171');
         connectBtn.disabled = false;
         return;
       }
@@ -2124,7 +2124,7 @@ function formatBytes(bytes) {
     try {
       const res = await fetch(`/api/shopify/manage?store=${encodeURIComponent(store)}&token=${encodeURIComponent(token)}&page=${currentPage}&limit=${PAGE_LIMIT}`);
       const data = await res.json();
-      if (!res.ok) { setStatus(`❌ ${data.error}`, true); return; }
+      if (!res.ok) { setStatus(`❌ ${typeof data.error === 'object' ? JSON.stringify(data.error) : (data.error || 'Error desconocido')}`, true); return; }
       allProducts = data.products || [];
       renderProducts(allProducts);
       setStatus(`${allProducts.length} producto(s) — página ${currentPage}`, false);
