@@ -1697,62 +1697,19 @@ function formatBytes(bytes) {
   });
 })();
 
-// ── Shopify manual credentials ─────────────────────────────────────────────
+// ── Shopify import ──────────────────────────────────────────────────────────
 (function () {
-  const storeInput = $('shopifyDestStore');
-  const tokenInput = $('shopifyDestToken');
-  const toggleBtn = $('shopifyTokenToggle');
-  const testBtn = $('shopifyTestConn');
   const connStatus = $('shopifyConnStatus');
   const importBtn = $('shopifyDirectImport');
   const importLog = $('shopifyImportLog');
 
-  if (!storeInput) return; // guard if elements not present
-
-  // Restore saved credentials
-  storeInput.value = localStorage.getItem('shp_store') || '';
-  tokenInput.value = localStorage.getItem('shp_token') || '';
-
-  toggleBtn.onclick = () => {
-    tokenInput.type = tokenInput.type === 'password' ? 'text' : 'password';
-  };
+  if (!importBtn) return; // guard if elements not present
 
   function getCredentials() {
-    const store = storeInput.value.trim().replace(/https?:\/\//, '').replace(/\/$/, '');
-    const token = tokenInput.value.trim();
+    const store = (localStorage.getItem('shp_store') || '').trim().replace(/https?:\/\//, '').replace(/\/$/, '');
+    const token = (localStorage.getItem('shp_token') || '').trim();
     return { store, token };
   }
-
-  testBtn.onclick = async () => {
-    const { store, token } = getCredentials();
-    if (!store || !token) { showConnStatus('Introduce la tienda y el token.', 'warn'); return; }
-    testBtn.disabled = true;
-    showConnStatus('Verificando conexión...', 'info');
-    try {
-      const res = await fetch('/api/shopify/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ store, token }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        showConnStatus(`✅ Conectado: ${data.shop.name} (${data.shop.domain})`, 'ok');
-        importBtn.disabled = false;
-        localStorage.setItem('shp_store', store);
-        localStorage.setItem('shp_token', token);
-        localStorage.setItem('oauth_shop', store); // remember store for OAuth field too
-        if ($('shopifyOAuthStore') && !$('shopifyOAuthStore').value) {
-          $('shopifyOAuthStore').value = store;
-        }
-      } else {
-        showConnStatus(`❌ ${data.error}`, 'error');
-        importBtn.disabled = true;
-      }
-    } catch (e) {
-      showConnStatus(`❌ Error de red: ${e.message}`, 'error');
-    }
-    testBtn.disabled = false;
-  };
 
   function showConnStatus(msg, type) {
     if (!connStatus) return;
