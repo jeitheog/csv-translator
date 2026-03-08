@@ -2,6 +2,7 @@ import json
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
@@ -40,6 +41,25 @@ def _norm_store(store):
     return store
 
 
+def _parse_link_header(link_header):
+    """Extract next/prev page_info cursors from a Shopify Link header."""
+    next_cursor = prev_cursor = None
+    for part in link_header.split(","):
+        url_m = re.search(r'<([^>]+)>', part)
+        rel_m = re.search(r'rel="([^"]+)"', part)
+        if not url_m or not rel_m:
+            continue
+        pi_m = re.search(r'page_info=([^&>]+)', url_m.group(1))
+        if not pi_m:
+            continue
+        cursor = pi_m.group(1)
+        if rel_m.group(1) == "next":
+            next_cursor = cursor
+        elif rel_m.group(1) == "previous":
+            prev_cursor = cursor
+    return next_cursor, prev_cursor
+
+
 def _keywords_from_url(src):
     """Extract lowercase words from a CDN image filename."""
     filename = src.split("?")[0].rsplit("/", 1)[-1]
@@ -49,42 +69,75 @@ def _keywords_from_url(src):
 
 class handler(BaseHTTPRequestHandler):
 
-    # ── GET /api/shopify/manage?store=…&token=…&page=…&limit=… ──────────────
+    # ── GET /api/shopify/manage?store=…&token=…&page_info=…&limit=… ─────────
     def do_GET(self):
-        params = parse_qs(urlparse(self.path).query)
-        store = _norm_store(params.get("store", [""])[0])
-        token = params.get("token", [""])[0]
-        page  = int(params.get("page",  ["1"])[0])
-        limit = min(int(params.get("limit", ["20"])[0]), 50)
+        params    = parse_qs(urlparse(self.path).query)
+        store     = _norm_store(params.get("store", [""])[0])
+        token     = params.get("token", [""])[0]
+        page_info = params.get("page_info", [None])[0]
+        limit     = min(int(params.get("limit", ["20"])[0]), 50)
 
         if not store or not token:
             self._respond(400, {"error": "Faltan store o token"})
             return
 
-        fields = "id,title,handle,status,images,variants,options"
-        status, data = _shopify_request(
-            store, token, "GET",
-            f"products.json?limit={limit}&page={page}&fields={fields}"
-        )
-        if status != 200:
-            self._respond(status or 502, {"error": data.get("errors", "Error al listar productos")})
+        # Cursor-based pagination (Shopify REST 2023-04+)
+        # When page_info is present only limit is allowed alongside it.
+        if page_info:
+            qs = f"limit={limit}&page_info={urllib.parse.quote(page_info, safe='')}"
+        else:
+            qs = f"limit={limit}"
+
+        url = f"https://{store}/admin/api/{SHOPIFY_API_VERSION}/products.json?{qs}"
+        headers = {
+            "X-Shopify-Access-Token": token,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        try:
+            with urllib.request.urlopen(req) as resp:
+                resp_body  = resp.read().decode()
+                link_hdr   = resp.headers.get("Link", "")
+                data       = json.loads(resp_body) if resp_body else {}
+                status     = resp.status
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode() if e.fp else "{}"
+            try:
+                err = json.loads(error_body)
+            except json.JSONDecodeError:
+                err = {"error": error_body}
+            self._respond(e.code, {"error": err.get("errors", err.get("error", "Error al listar productos"))})
+            return
+        except urllib.error.URLError as e:
+            self._respond(502, {"error": str(e.reason)})
             return
 
-        # Lightweight response: just what the UI needs
+        if status != 200:
+            self._respond(status, {"error": data.get("errors", "Error al listar productos")})
+            return
+
+        next_cursor, prev_cursor = _parse_link_header(link_hdr)
+
         products = []
         for p in data.get("products", []):
             thumb = p["images"][0]["src"] if p.get("images") else ""
             products.append({
-                "id":       p["id"],
-                "title":    p.get("title", ""),
-                "handle":   p.get("handle", ""),
-                "status":   p.get("status", ""),
-                "thumb":    thumb,
-                "variants": [{"id": v["id"], "option1": v.get("option1"), "option2": v.get("option2"), "option3": v.get("option3")} for v in p.get("variants", [])],
-                "options":  [o.get("name") for o in p.get("options", [])],
+                "id":          p["id"],
+                "title":       p.get("title", ""),
+                "handle":      p.get("handle", ""),
+                "status":      p.get("status", ""),
+                "thumb":       thumb,
+                "variants":    [{"id": v["id"], "option1": v.get("option1"), "option2": v.get("option2"), "option3": v.get("option3")} for v in p.get("variants", [])],
+                "options":     [o.get("name") for o in p.get("options", [])],
             })
 
-        self._respond(200, {"products": products, "page": page, "count": len(products)})
+        self._respond(200, {
+            "products":    products,
+            "count":       len(products),
+            "next_cursor": next_cursor,
+            "prev_cursor": prev_cursor,
+        })
 
     # ── POST /api/shopify/manage ─────────────────────────────────────────────
     def do_POST(self):

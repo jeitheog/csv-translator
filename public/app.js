@@ -2051,7 +2051,8 @@ function formatBytes(bytes) {
 
   if (!toggleBtn) return;
 
-  let currentPage   = 1;
+  let nextCursor    = null;
+  let prevCursor    = null;
   let allProducts   = [];   // current page products
   let selectedIds   = new Set();
   const PAGE_LIMIT  = 20;
@@ -2081,14 +2082,14 @@ function formatBytes(bytes) {
     panel.style.display = open ? '' : 'none';
     toggleArrow.textContent = open ? '▲' : '▼';
     toggleBtn.querySelector('span:last-child') && (toggleBtn.querySelector('span:last-child').textContent = open ? 'Ocultar' : 'Ver productos');
-    if (open && listEl.children.length === 0) loadProducts();
+    if (open && listEl.children.length === 0) loadProducts(null);
   });
 
   // ── Load products ──
-  loadBtn.addEventListener('click', () => { currentPage = 1; loadProducts(); });
+  loadBtn.addEventListener('click', () => { nextCursor = null; prevCursor = null; loadProducts(null); });
 
-  prevBtn.addEventListener('click', () => { if (currentPage > 1) { currentPage--; loadProducts(); } });
-  nextBtn.addEventListener('click', () => { currentPage++; loadProducts(); });
+  prevBtn.addEventListener('click', () => { if (prevCursor) loadProducts(prevCursor, true); });
+  nextBtn.addEventListener('click', () => { if (nextCursor) loadProducts(nextCursor, false); });
 
   searchInput.addEventListener('input', () => {
     const q = searchInput.value.trim().toLowerCase();
@@ -2112,24 +2113,28 @@ function formatBytes(bytes) {
     setStatus(`✅ Eliminados: ${data.deleted} · Errores: ${data.errors}`, false);
     selectedIds.clear();
     updateDeleteBtn();
-    currentPage = 1;
-    loadProducts();
+    nextCursor = null; prevCursor = null;
+    loadProducts(null);
   });
 
-  async function loadProducts() {
+  async function loadProducts(cursor) {
     const { store, token } = getCredentials();
     if (!store || !token) { setStatus('Conecta tu tienda primero.', true); return; }
     setStatus('⏳ Cargando productos...', false);
     loadBtn.disabled = true;
     try {
-      const res = await fetch(`/api/shopify/manage?store=${encodeURIComponent(store)}&token=${encodeURIComponent(token)}&page=${currentPage}&limit=${PAGE_LIMIT}`);
+      let url = `/api/shopify/manage?store=${encodeURIComponent(store)}&token=${encodeURIComponent(token)}&limit=${PAGE_LIMIT}`;
+      if (cursor) url += `&page_info=${encodeURIComponent(cursor)}`;
+      const res  = await fetch(url);
       const data = await res.json();
       if (!res.ok) { setStatus(`❌ ${typeof data.error === 'object' ? JSON.stringify(data.error) : (data.error || 'Error desconocido')}`, true); return; }
-      allProducts = data.products || [];
+      allProducts  = data.products || [];
+      nextCursor   = data.next_cursor || null;
+      prevCursor   = data.prev_cursor || null;
       renderProducts(allProducts);
-      setStatus(`${allProducts.length} producto(s) — página ${currentPage}`, false);
-      prevBtn.style.display = currentPage > 1 ? '' : 'none';
-      nextBtn.style.display = allProducts.length === PAGE_LIMIT ? '' : 'none';
+      setStatus(`${allProducts.length} producto(s) cargados`, false);
+      prevBtn.style.display = prevCursor ? '' : 'none';
+      nextBtn.style.display = nextCursor ? '' : 'none';
     } catch (e) {
       setStatus(`❌ ${e.message}`, true);
     } finally {
