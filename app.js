@@ -73,8 +73,8 @@ function addColorOptionValues(headers, rows) {
     const valueIdx = normalizedHeaders.indexOf(valueMatch);
 
     if (nameIdx >= 0 && valueIdx >= 0) {
-      // Check first 10 rows for the option name value (e.g. "Color")
-      for (let i = 0; i < Math.min(rows.length, 10); i++) {
+      // Check ALL rows for the option name (e.g. "Color") — not just first 10
+      for (let i = 0; i < rows.length; i++) {
         const val = (rows[i][nameIdx] || '').trim().toLowerCase();
         if (val && COLOR_KEYWORDS.some(k => val.includes(k))) {
           extra.add(headers[valueIdx]);
@@ -262,8 +262,8 @@ function resetUpload() {
   stepConfigure.classList.add('hidden');
   stepProgress.classList.add('hidden');
   stepResult.classList.add('hidden');
-  const sStep = $('shopifyStep');
-  if (sStep) sStep.classList.add('hidden');
+  const widget = $('shopifyWidget');
+  if (widget) widget.classList.add('hidden');
   importStatus.classList.add('hidden');
   importFromUrlBtn.disabled = false;
   state.rawText = '';
@@ -636,10 +636,6 @@ function showConfigStep() {
   }
 
   stepConfigure.classList.remove('hidden');
-  if (state.isShopify) {
-    const sStep = $('shopifyStep');
-    if (sStep) sStep.classList.remove('hidden');
-  }
   buildColumnsGrid();
 }
 
@@ -650,11 +646,15 @@ function buildColumnsGrid() {
   // Dynamically add color option value columns
   const colorCols = state.isShopify ? addColorOptionValues(state.headers, state.rows) : new Set();
 
+  // Store color column indices so isSkippable can exempt them from the short-text filter
+  state.colorColIndices = new Set();
+
   // Case-insensitive check for Shopify translatable columns
   const normalizedTranslatable = new Set(Array.from(SHOPIFY_TRANSLATABLE_COLS).map(c => c.toLowerCase()));
   const normalizedColorCols = new Set(Array.from(colorCols).map(c => c.toLowerCase()));
 
   state.headers.forEach((header, idx) => {
+    if (normalizedColorCols.has(header.toLowerCase())) state.colorColIndices.add(idx);
     const hLower = header.toLowerCase();
     const shouldTranslate = state.isShopify
       ? (normalizedTranslatable.has(hLower) || normalizedColorCols.has(hLower)) // Shopify: text + color fields
@@ -954,12 +954,16 @@ async function startTranslation() {
     : state.headers.indexOf('URL handle');
   const enhancedTitles = {};
 
+  // Color column indices: never skip these even if they look like short codes
+  const colorColIndices = state.colorColIndices || new Set();
+
   // Helper: check if text is "untranslatable" (number, URL, code, etc.)
-  function isSkippable(text) {
+  function isSkippable(text, colIdx) {
     if (!text || text.trim() === '') return true;
     if (/^\d+([.,]\d+)?$/.test(text.trim())) return true;
     if (/^https?:\/\//i.test(text.trim())) return true;
-    if (/^[A-Z0-9_\-]+$/i.test(text.trim()) && text.trim().length < 8) return true; // Only skip very short SKUs/codes
+    if (colorColIndices.has(colIdx)) return false; // never skip colour values
+    if (/^[A-Z0-9_\-]+$/i.test(text.trim()) && text.trim().length < 8) return true;
     return false;
   }
 
@@ -980,7 +984,7 @@ async function startTranslation() {
       // Verify: did translation actually change the text?
       const didTranslate = translated !== null && translated !== originalText;
       // Never skip translating titles
-      const skippable = (colIdx === titleIdx) ? false : isSkippable(originalText);
+      const skippable = (colIdx === titleIdx) ? false : isSkippable(originalText, colIdx);
 
       if (translated === null) {
         // Explicit failure — keep original, mark for retry
@@ -1236,10 +1240,9 @@ function showResult(totalCells, successCount, failedCount, skippedRows) {
   buildResultTable(resultTable, state.translatedRows, false);
   buildResultTable(comparisonTable, state.translatedRows, true);
 
-  const sStep = $('shopifyStep');
-  if (sStep) {
-    console.log("Showing shopifyStep in showResult");
-    sStep.classList.remove('hidden');
+  if (state.isShopify) {
+    const sw = $('shopifyWidget');
+    if (sw) sw.classList.remove('hidden');
   }
 }
 
@@ -1407,7 +1410,41 @@ function buildCSVContent() {
     return r;
   });
 
+  // ── Ensure Variant Image URLs appear as Image Src (required for Shopify CSV import) ──
+  // Shopify's CSV importer only links a variant to its image when the Variant Image URL
+  // also appears as an Image Src somewhere in the same product's rows.
+  // Post-process: for each product, add any unseen Variant Image URL as Image Src
+  // on the first row of its colour group.
+  if (state.isShopify) {
+    const hIdx = state.headers.findIndex(h => /^(handle|url handle)$/i.test(h.trim()));
+    const isIdx = state.headers.findIndex(h => /^(image src|product image url)$/i.test(h.trim()));
+    const viIdx = state.headers.findIndex(h => /^(variant image|variant image url)$/i.test(h.trim()));
+
+    if (hIdx >= 0 && isIdx >= 0 && viIdx >= 0) {
+      const groups = new Map();
+      rows.forEach((r, i) => {
+        const h = (r[hIdx] || '').toString().trim();
+        if (!h) return;
+        if (!groups.has(h)) groups.set(h, []);
+        groups.get(h).push(i);
+      });
+      groups.forEach(idxList => {
+        const seen = new Set(idxList.map(i => (rows[i][isIdx] || '').toString().trim()).filter(Boolean));
+        let lastVI = '';
+        idxList.forEach(i => {
+          const vi = (rows[i][viIdx] || '').toString().trim();
+          if (vi) lastVI = vi;
+          if (lastVI && !seen.has(lastVI)) {
+            rows[i][isIdx] = lastVI;
+            seen.add(lastVI);
+          }
+        });
+      });
+    }
+  }
+
   // Output CSV with EXACT same headers as input — no renaming
+
   const lines = [state.headers, ...rows].map(row =>
     row.map(cell => {
       const s = String(cell ?? '');
@@ -1516,35 +1553,26 @@ function formatBytes(bytes) {
 
 // ── Shopify Direct Import ───────────────────────────────────
 (function () {
-  const storeInput = $('shopifyDestStore');
-  const tokenInput = $('shopifyDestToken');
-  const toggleBtn = $('shopifyTokenToggle');
-  const testBtn = $('shopifyTestConn');
   const connStatus = $('shopifyConnStatus');
   const importBtn = $('shopifyDirectImport');
   const importLog = $('shopifyImportLog');
 
-  if (!storeInput) return; // guard if elements not present
-
-  // Restore saved credentials
-  storeInput.value = localStorage.getItem('shp_store') || '';
-  tokenInput.value = localStorage.getItem('shp_token') || '';
-
-  toggleBtn.onclick = () => {
-    tokenInput.type = tokenInput.type === 'password' ? 'text' : 'password';
-  };
+  if (!importBtn) return;
 
   function getCredentials() {
-    const store = storeInput.value.trim().replace(/https?:\/\//, '').replace(/\/$/, '');
-    const token = tokenInput.value.trim();
+    const store = (localStorage.getItem('shp_store') || '').trim().replace(/https?:\/\//, '').replace(/\/$/, '');
+    const token = (localStorage.getItem('shp_token') || '').trim();
     return { store, token };
   }
 
-  testBtn.onclick = async () => {
+  async function verifyConnection(silent = false) {
     const { store, token } = getCredentials();
-    if (!store || !token) { showConnStatus('Introduce la tienda y el token.', 'warn'); return; }
-    testBtn.disabled = true;
-    showConnStatus('Verificando conexión...', 'info');
+    if (!store || !token) {
+      if (!silent) showConnStatus('Sin configurar', 'muted');
+      return;
+    }
+
+    if (!silent) showConnStatus('Verificando...', 'info');
     try {
       const res = await fetch('/api/shopify/test', {
         method: 'POST',
@@ -1553,19 +1581,25 @@ function formatBytes(bytes) {
       });
       const data = await res.json();
       if (data.success) {
-        showConnStatus(`✅ Conectado: ${data.shop.name} (${data.shop.domain})`, 'ok');
+        showConnStatus(`✅ Conectado a ${data.shop.name}`, 'ok');
         importBtn.disabled = false;
-        localStorage.setItem('shp_store', store);
-        localStorage.setItem('shp_token', token);
       } else {
-        showConnStatus(`❌ ${data.error}`, 'error');
+        showConnStatus(`❌ Error de conexión`, 'error');
         importBtn.disabled = true;
       }
     } catch (e) {
-      showConnStatus(`❌ Error de red: ${e.message}`, 'error');
+      showConnStatus(`❌ Error de red`, 'error');
+      if (!silent) console.error(e);
     }
-    testBtn.disabled = false;
-  };
+  }
+
+  // Auto-verify on load
+  const { store, token } = getCredentials();
+  if (store && token) {
+    verifyConnection(true);
+  } else {
+    showConnStatus('Sin configurar', 'muted');
+  }
 
   importBtn.onclick = async () => {
     const { store, token } = getCredentials();
@@ -1934,8 +1968,7 @@ function formatBytes(bytes) {
 
   function showConnStatus(msg, type) {
     connStatus.textContent = msg;
-    connStatus.style.display = '';
-    connStatus.style.color = type === 'ok' ? '#4ade80' : type === 'error' ? '#f87171' : type === 'warn' ? '#fbbf24' : 'rgba(255,255,255,0.6)';
+    connStatus.style.color = type === 'ok' ? '#4ade80' : type === 'error' ? '#f87171' : type === 'warn' ? '#fbbf24' : 'rgba(255,255,255,0.45)';
   }
 
   function addLogItem(text) {
