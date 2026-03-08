@@ -2180,19 +2180,22 @@ function formatBytes(bytes) {
       const actions = document.createElement('div');
       actions.style.cssText = 'display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;';
 
-      const btnFix   = mkBtn('🔗 Imágenes', '#96bf48', '0.2');
-      const btnTrans = mkBtn('🌐 Traducir', '#06b6d4', '0.2');
-      const btnDel   = mkBtn('🗑️', '#ef4444',   '0.15');
+      const btnFix    = mkBtn('🔗 Imágenes',  '#96bf48', '0.2');
+      const btnTrans  = mkBtn('🌐 Variantes', '#06b6d4', '0.2');
+      const btnTitle  = mkBtn('📝 Título/Desc', '#a78bfa', '0.2');
+      const btnDel    = mkBtn('🗑️', '#ef4444', '0.15');
 
       btnFix.title   = 'Relinkear imágenes de variantes por nombre de color';
       btnTrans.title = 'Traducir nombres de variantes al español';
+      btnTitle.title = 'Traducir título y descripción al español';
       btnDel.title   = 'Eliminar producto de Shopify';
 
-      btnFix.addEventListener('click', () => fixImages(p, btnFix));
+      btnFix.addEventListener('click',   () => fixImages(p, btnFix));
       btnTrans.addEventListener('click', () => translateVariants(p, btnTrans));
-      btnDel.addEventListener('click',  () => deleteProduct(p, row, btnDel));
+      btnTitle.addEventListener('click', () => translateTitleDesc(p, row, btnTitle));
+      btnDel.addEventListener('click',   () => deleteProduct(p, row, btnDel));
 
-      actions.append(btnFix, btnTrans, btnDel);
+      actions.append(btnFix, btnTrans, btnTitle, btnDel);
       row.append(cb, thumb, info, actions);
       listEl.appendChild(row);
     });
@@ -2275,6 +2278,50 @@ function formatBytes(bytes) {
     } finally {
       btn.disabled = false;
       setTimeout(() => { btn.textContent = orig; }, 3500);
+    }
+  }
+
+  // ── Translate product title and description ──
+  async function translateTitleDesc(p, row, btn) {
+    const { store, token } = getCredentials();
+    const lang = (sourceLang && sourceLang.value !== 'auto') ? sourceLang.value : 'en';
+    const langPair = `${lang}|es`;
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = '⏳';
+
+    try {
+      // Fetch full product to get body_html
+      const fetchRes = await fetch(`/api/shopify/manage?store=${encodeURIComponent(store)}&token=${encodeURIComponent(token)}&product_id=${p.id}`);
+      const fetchData = await fetchRes.json();
+      if (!fetchRes.ok) { btn.textContent = '❌'; return; }
+
+      const { title: currentTitle, body_html: currentBody } = fetchData.product;
+
+      const [tTitle, tBody] = await Promise.all([
+        currentTitle ? translateText(currentTitle, langPair) : Promise.resolve(currentTitle),
+        currentBody  ? translateText(currentBody,  langPair) : Promise.resolve(currentBody),
+      ]);
+
+      await fetch('/api/shopify/manage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ store, token, action: 'update_title_body', product_id: p.id, title: tTitle || currentTitle, body_html: tBody || currentBody }),
+      });
+
+      // Update the displayed title in the row
+      if (tTitle) {
+        p.title = tTitle;
+        row.dataset.title = tTitle.toLowerCase();
+        const titleEl = row.querySelector('p');
+        if (titleEl) titleEl.textContent = tTitle;
+      }
+
+      btn.textContent = '✅ Traducido';
+    } catch (e) {
+      btn.textContent = '❌';
+    } finally {
+      btn.disabled = false;
+      setTimeout(() => { btn.textContent = orig; }, 3000);
     }
   }
 

@@ -81,6 +81,17 @@ class handler(BaseHTTPRequestHandler):
             self._respond(400, {"error": "Faltan store o token"})
             return
 
+        # Single-product fetch (used by frontend before translating title/body)
+        product_id = params.get("product_id", [None])[0]
+        if product_id:
+            status, data = _shopify_request(store, token, "GET", f"products/{product_id}.json")
+            if status != 200:
+                self._respond(status or 502, {"error": "No se pudo obtener el producto"})
+                return
+            p = data.get("product", {})
+            self._respond(200, {"product": {"id": p["id"], "title": p.get("title", ""), "body_html": p.get("body_html", "")}})
+            return
+
         # Cursor-based pagination (Shopify REST 2023-04+)
         # When page_info is present only limit is allowed alongside it.
         if page_info:
@@ -161,6 +172,8 @@ class handler(BaseHTTPRequestHandler):
             self._fix_images(store, token, product_id)
         elif action == "update_variants":
             self._update_variants(store, token, product_id, body.get("variants", []))
+        elif action == "update_title_body":
+            self._update_title_body(store, token, product_id, body.get("title"), body.get("body_html"))
         else:
             self._respond(400, {"error": f"Acción desconocida: {action}"})
 
@@ -237,6 +250,18 @@ class handler(BaseHTTPRequestHandler):
                 updated += 1
             time.sleep(0.3)
         self._respond(200, {"success": True, "updated": updated})
+
+    # ── Update product title and body_html ───────────────────────────────────
+    def _update_title_body(self, store, token, product_id, title, body_html):
+        patch = {"id": product_id}
+        if title     is not None: patch["title"]     = title
+        if body_html is not None: patch["body_html"] = body_html
+        status, _ = _shopify_request(
+            store, token, "PUT",
+            f"products/{product_id}.json",
+            {"product": patch},
+        )
+        self._respond(200, {"success": status == 200})
 
     def do_OPTIONS(self):
         self.send_response(200)
