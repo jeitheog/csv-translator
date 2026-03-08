@@ -1514,188 +1514,6 @@ function formatBytes(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
-// ── Shopify OAuth: credential setup + popup flow ───────────────────────────
-(function () {
-  const clientIdInput = $('oauthClientId');
-  const clientSecretInput = $('oauthClientSecret');
-  const secretToggle = $('oauthSecretToggle');
-  const saveBtn = $('oauthSaveBtn');
-  const savedBadge = $('oauthConfigSaved');
-  const oauthBtn = $('shopifyOAuthBtn');
-  const oauthStore = $('shopifyOAuthStore');
-  const oauthStatus = $('shopifyOAuthStatus');
-
-  if (!oauthBtn) return;
-
-  // ── Load saved credentials and store name on page load ──
-  if (clientIdInput) clientIdInput.value = localStorage.getItem('oauth_client_id') || '';
-  if (clientSecretInput) clientSecretInput.value = localStorage.getItem('oauth_client_secret') || '';
-  if (oauthStore) oauthStore.value = localStorage.getItem('oauth_shop') || '';
-  if (savedBadge && localStorage.getItem('oauth_client_id')) savedBadge.style.display = '';
-
-  // ── Save store name as the user types ──
-  if (oauthStore) {
-    oauthStore.addEventListener('input', () => {
-      const v = oauthStore.value.trim();
-      if (v) localStorage.setItem('oauth_shop', v);
-    });
-  }
-
-  // ── Toggle Client Secret visibility ──
-  if (secretToggle && clientSecretInput) {
-    secretToggle.addEventListener('click', () => {
-      clientSecretInput.type = clientSecretInput.type === 'password' ? 'text' : 'password';
-    });
-  }
-
-  // ── Save credentials to localStorage ──
-  if (saveBtn) {
-    saveBtn.addEventListener('click', () => {
-      const id = (clientIdInput ? clientIdInput.value : '').trim();
-      const secret = (clientSecretInput ? clientSecretInput.value : '').trim();
-      if (!id || !secret) {
-        alert('Introduce tanto el Client ID como el Client Secret antes de guardar.');
-        return;
-      }
-      localStorage.setItem('oauth_client_id', id);
-      localStorage.setItem('oauth_client_secret', secret);
-      if (savedBadge) {
-        savedBadge.style.display = '';
-        setTimeout(() => { savedBadge.style.display = 'none'; }, 3000);
-      }
-      saveBtn.textContent = '✅ Guardado';
-      setTimeout(() => { saveBtn.textContent = 'Guardar credenciales'; }, 2500);
-    });
-  }
-
-  // ── Helper: show OAuth status message ──
-  function setOAuthStatus(msg, type) {
-    if (!oauthStatus) return;
-    oauthStatus.style.display = '';
-    oauthStatus.textContent = msg;
-    oauthStatus.style.color = type === 'ok' ? '#4ade80'
-      : type === 'error' ? '#f87171'
-        : type === 'warn' ? '#fbbf24'
-          : 'rgba(255,255,255,0.6)';
-  }
-
-  // ── "Conectar con Shopify" button ──
-  oauthBtn.addEventListener('click', async () => {
-    const shop = (oauthStore ? oauthStore.value : '').trim().replace(/https?:\/\//, '').replace(/\/$/, '');
-    const clientId = localStorage.getItem('oauth_client_id') || '';
-    const clientSecret = localStorage.getItem('oauth_client_secret') || '';
-
-    if (!shop) {
-      setOAuthStatus('⚠️ Escribe el dominio de tu tienda (ej: mi-tienda.myshopify.com)', 'warn');
-      return;
-    }
-    if (!clientId || !clientSecret) {
-      setOAuthStatus('⚠️ Guarda primero tu Client ID y Client Secret en el bloque de arriba.', 'warn');
-      return;
-    }
-
-    oauthBtn.disabled = true;
-    setOAuthStatus('⏳ Generando enlace de autorización...', 'info');
-
-    try {
-      // Pass app_url from the browser so redirect_uri is always exact
-      const appUrl = window.location.origin;
-      const params = new URLSearchParams({ shop, client_id: clientId, app_url: appUrl });
-      const res = await fetch(`/api/shopify/oauth_start?${params}`);
-      const data = await res.json();
-
-      if (!data.auth_url) {
-        setOAuthStatus(`❌ ${data.error || 'Error al generar la URL de autorización'}`, 'error');
-        oauthBtn.disabled = false;
-        return;
-      }
-
-      // Store everything the callback page needs in sessionStorage
-      sessionStorage.setItem('shopify_oauth_state', data.state);
-      sessionStorage.setItem('oauth_client_id', clientId);
-      sessionStorage.setItem('oauth_client_secret', clientSecret);
-
-      // Open Shopify authorization in a popup
-      const popup = window.open(
-        data.auth_url,
-        'shopify_oauth',
-        'width=620,height=720,left=200,top=80,resizable=yes,scrollbars=yes'
-      );
-
-      if (!popup) {
-        setOAuthStatus('❌ El navegador bloqueó la ventana emergente. Permite los popups para este sitio.', 'error');
-        oauthBtn.disabled = false;
-        return;
-      }
-
-      setOAuthStatus('⏳ Esperando que apruebes el acceso en la ventana de Shopify...', 'info');
-
-      // Clear any leftover result from a previous attempt
-      localStorage.removeItem('shopify_oauth_result');
-
-      function handleOAuthResult(d) {
-        oauthBtn.disabled = false;
-        if (d.type === 'shopify_oauth_success') {
-          const { token, store, shop_name } = d;
-
-          const storeInput = $('shopifyDestStore');
-          const tokenInput = $('shopifyDestToken');
-          if (storeInput) storeInput.value = store;
-          if (tokenInput) tokenInput.value = token;
-          localStorage.setItem('shp_store', store);
-          localStorage.setItem('shp_token', token);
-          localStorage.setItem('oauth_shop', store);
-
-          setOAuthStatus(`✅ ¡Conectado a "${shop_name}" correctamente!`, 'ok');
-
-          const importBtn = $('shopifyDirectImport');
-          if (importBtn) importBtn.disabled = false;
-
-          const connStatus = $('shopifyConnStatus');
-          if (connStatus) {
-            connStatus.style.display = '';
-            connStatus.textContent = `✅ Conectado: ${shop_name} (via OAuth)`;
-            connStatus.style.color = '#4ade80';
-          }
-
-          const oauthStatusEl = $('shopifyOAuthStatus');
-          if (oauthStatusEl) {
-            setTimeout(() => oauthStatusEl.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
-          }
-        } else {
-          setOAuthStatus(`❌ ${d.error || 'Autorización rechazada o cancelada'}`, 'error');
-        }
-      }
-
-      // Poll localStorage every 300ms — works regardless of browser storage event behavior
-      const timer = setInterval(() => {
-        const resultStr = localStorage.getItem('shopify_oauth_result');
-        if (resultStr) {
-          clearInterval(timer);
-          localStorage.removeItem('shopify_oauth_result');
-          try { popup.close(); } catch (_) { }
-          handleOAuthResult(JSON.parse(resultStr));
-          return;
-        }
-        if (popup.closed) {
-          // Popup closed — wait one more second for localStorage to arrive before giving up
-          if (!popup._graceStart) popup._graceStart = Date.now();
-          if (Date.now() - popup._graceStart < 1000) return; // keep polling during grace period
-          clearInterval(timer);
-          oauthBtn.disabled = false;
-          // If still in "waiting" state, silently reset (don't show scary warning)
-          if (oauthStatus && (oauthStatus.textContent || '').includes('Esperando')) {
-            setOAuthStatus('', '');
-          }
-        }
-      }, 300);
-
-    } catch (e) {
-      setOAuthStatus(`❌ Error: ${e.message}`, 'error');
-      oauthBtn.disabled = false;
-    }
-  });
-})();
 
 // ── Shopify import ──────────────────────────────────────────────────────────
 (function () {
@@ -2098,8 +1916,8 @@ function formatBytes(bytes) {
   const oauthStatus   = $('shopifyOAuthStatus');
   const clientIdInput = $('oauthClientId');
   const clientSecInput= $('oauthClientSecret');
+  const secretToggle  = $('oauthSecretToggle');
   const saveBtn       = $('oauthSaveBtn');
-  const connStatus    = $('shopifyConnStatus');
   const importBtn     = $('shopifyDirectImport');
 
   if (!connectBtn) return;
@@ -2108,6 +1926,13 @@ function formatBytes(bytes) {
   if (clientIdInput)  clientIdInput.value  = localStorage.getItem('oauth_client_id')     || '';
   if (clientSecInput) clientSecInput.value = localStorage.getItem('oauth_client_secret') || '';
   if (storeInput)     storeInput.value     = localStorage.getItem('oauth_shop')           || '';
+
+  // ── Toggle Client Secret visibility ──
+  if (secretToggle && clientSecInput) {
+    secretToggle.addEventListener('click', () => {
+      clientSecInput.type = clientSecInput.type === 'password' ? 'text' : 'password';
+    });
+  }
 
   function setStatus(msg, color) {
     if (!oauthStatus) return;
@@ -2121,7 +1946,6 @@ function formatBytes(bytes) {
   const savedToken = localStorage.getItem('shp_token') || '';
   if (savedStore && savedToken) {
     setStatus(`✅ Conectado a "${savedStore}"`, '#4ade80');
-    if (connStatus) { connStatus.textContent = `✅ Conectado a ${savedStore}`; connStatus.style.color = '#4ade80'; connStatus.style.display = ''; }
     if (importBtn) importBtn.disabled = false;
   }
 
@@ -2141,7 +1965,6 @@ function formatBytes(bytes) {
         if (destStore) destStore.value = d.store;
         if (destToken) destToken.value = d.token;
         setStatus(`✅ ¡Conectado a "${d.shop_name}"!`, '#4ade80');
-        if (connStatus) { connStatus.textContent = `✅ Conectado a ${d.shop_name}`; connStatus.style.color = '#4ade80'; connStatus.style.display = ''; }
         if (importBtn) importBtn.disabled = false;
         setTimeout(() => oauthStatus && oauthStatus.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200);
       } else {
