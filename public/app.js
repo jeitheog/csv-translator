@@ -2035,3 +2035,276 @@ function formatBytes(bytes) {
     }
   });
 })();
+
+// ── Panel de gestión de productos ───────────────────────────────────────────
+(function () {
+  const toggleBtn         = $('mgmtToggleBtn');
+  const toggleArrow       = $('mgmtToggleArrow');
+  const panel             = $('mgmtPanel');
+  const loadBtn           = $('mgmtLoadBtn');
+  const searchInput       = $('mgmtSearch');
+  const listEl            = $('mgmtList');
+  const statusEl          = $('mgmtStatus');
+  const prevBtn           = $('mgmtPrevBtn');
+  const nextBtn           = $('mgmtNextBtn');
+  const deleteSelectedBtn = $('mgmtDeleteSelectedBtn');
+
+  if (!toggleBtn) return;
+
+  let currentPage   = 1;
+  let allProducts   = [];   // current page products
+  let selectedIds   = new Set();
+  const PAGE_LIMIT  = 20;
+
+  function getCredentials() {
+    const store = (localStorage.getItem('shp_store') || '').trim();
+    const token = (localStorage.getItem('shp_token') || '').trim();
+    return { store, token };
+  }
+
+  // Enable toggle when store is connected
+  function checkConnected() {
+    const { store, token } = getCredentials();
+    if (store && token) toggleBtn.disabled = false;
+  }
+  checkConnected();
+  window.addEventListener('load', checkConnected);
+
+  // ── Toggle panel open/close ──
+  toggleBtn.addEventListener('click', () => {
+    const open = panel.style.display === 'none';
+    panel.style.display = open ? '' : 'none';
+    toggleArrow.textContent = open ? '▲' : '▼';
+    if (open && listEl.children.length === 0) loadProducts();
+  });
+
+  // ── Load products ──
+  loadBtn.addEventListener('click', () => { currentPage = 1; loadProducts(); });
+
+  prevBtn.addEventListener('click', () => { if (currentPage > 1) { currentPage--; loadProducts(); } });
+  nextBtn.addEventListener('click', () => { currentPage++; loadProducts(); });
+
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.trim().toLowerCase();
+    listEl.querySelectorAll('.mgmt-row').forEach(row => {
+      row.style.display = (!q || row.dataset.title.includes(q)) ? '' : 'none';
+    });
+  });
+
+  deleteSelectedBtn.addEventListener('click', async () => {
+    if (!selectedIds.size) return;
+    if (!confirm(`¿Eliminar ${selectedIds.size} producto(s) de Shopify?`)) return;
+    setStatus('⏳ Eliminando...', false);
+    deleteSelectedBtn.disabled = true;
+    const { store, token } = getCredentials();
+    const res = await fetch('/api/shopify/manage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ store, token, action: 'delete_bulk', product_ids: [...selectedIds] }),
+    });
+    const data = await res.json();
+    setStatus(`✅ Eliminados: ${data.deleted} · Errores: ${data.errors}`, false);
+    selectedIds.clear();
+    updateDeleteBtn();
+    currentPage = 1;
+    loadProducts();
+  });
+
+  async function loadProducts() {
+    const { store, token } = getCredentials();
+    if (!store || !token) { setStatus('Conecta tu tienda primero.', true); return; }
+    setStatus('⏳ Cargando productos...', false);
+    loadBtn.disabled = true;
+    try {
+      const res = await fetch(`/api/shopify/manage?store=${encodeURIComponent(store)}&token=${encodeURIComponent(token)}&page=${currentPage}&limit=${PAGE_LIMIT}`);
+      const data = await res.json();
+      if (!res.ok) { setStatus(`❌ ${data.error}`, true); return; }
+      allProducts = data.products || [];
+      renderProducts(allProducts);
+      setStatus(`${allProducts.length} producto(s) — página ${currentPage}`, false);
+      prevBtn.style.display = currentPage > 1 ? '' : 'none';
+      nextBtn.style.display = allProducts.length === PAGE_LIMIT ? '' : 'none';
+    } catch (e) {
+      setStatus(`❌ ${e.message}`, true);
+    } finally {
+      loadBtn.disabled = false;
+    }
+  }
+
+  function renderProducts(products) {
+    listEl.innerHTML = '';
+    selectedIds.clear();
+    updateDeleteBtn();
+    if (!products.length) { listEl.innerHTML = '<p style="color:rgba(255,255,255,0.35);font-size:0.85rem;">No hay productos.</p>'; return; }
+
+    products.forEach(p => {
+      const row = document.createElement('div');
+      row.className = 'mgmt-row';
+      row.dataset.title = (p.title || '').toLowerCase();
+      row.style.cssText = 'display:flex;align-items:center;gap:10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px 12px;';
+
+      // Checkbox
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.style.cssText = 'width:16px;height:16px;flex-shrink:0;cursor:pointer;accent-color:#96bf48;';
+      cb.addEventListener('change', () => {
+        if (cb.checked) selectedIds.add(p.id); else selectedIds.delete(p.id);
+        updateDeleteBtn();
+      });
+
+      // Thumb
+      const thumb = document.createElement('img');
+      thumb.src   = p.thumb || '';
+      thumb.alt   = '';
+      thumb.style.cssText = 'width:44px;height:44px;object-fit:cover;border-radius:6px;flex-shrink:0;background:rgba(255,255,255,0.06);';
+      if (!p.thumb) thumb.style.display = 'none';
+
+      // Info
+      const info = document.createElement('div');
+      info.style.cssText = 'flex:1;min-width:0;';
+      info.innerHTML = `<p style="margin:0;font-size:0.88rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(p.title)}</p>
+        <p style="margin:2px 0 0;font-size:0.75rem;color:rgba(255,255,255,0.35);">${p.variants.length} variante(s) · ${p.status}</p>`;
+
+      // Actions
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;';
+
+      const btnFix   = mkBtn('🔗 Imágenes', '#96bf48', '0.2');
+      const btnTrans = mkBtn('🌐 Traducir', '#06b6d4', '0.2');
+      const btnDel   = mkBtn('🗑️', '#ef4444',   '0.15');
+
+      btnFix.title   = 'Relinkear imágenes de variantes por nombre de color';
+      btnTrans.title = 'Traducir nombres de variantes al español';
+      btnDel.title   = 'Eliminar producto de Shopify';
+
+      btnFix.addEventListener('click', () => fixImages(p, btnFix));
+      btnTrans.addEventListener('click', () => translateVariants(p, btnTrans));
+      btnDel.addEventListener('click',  () => deleteProduct(p, row, btnDel));
+
+      actions.append(btnFix, btnTrans, btnDel);
+      row.append(cb, thumb, info, actions);
+      listEl.appendChild(row);
+    });
+  }
+
+  function mkBtn(label, color, alpha) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.style.cssText = `padding:5px 10px;border-radius:7px;border:1px solid ${color}66;background:${color}${Math.round(parseFloat(alpha)*255).toString(16).padStart(2,'0')};color:${color};font-size:0.78rem;cursor:pointer;white-space:nowrap;`;
+    return b;
+  }
+
+  // ── Fix images for a product ──
+  async function fixImages(p, btn) {
+    const { store, token } = getCredentials();
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = '⏳';
+    try {
+      const res = await fetch('/api/shopify/manage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ store, token, action: 'fix_images', product_id: p.id }),
+      });
+      const data = await res.json();
+      btn.textContent = data.linked > 0 ? `✅ ${data.linked} imág.` : '⚠️ 0';
+    } catch (e) {
+      btn.textContent = '❌';
+    } finally {
+      btn.disabled = false;
+      setTimeout(() => { btn.textContent = orig; }, 3000);
+    }
+  }
+
+  // ── Translate variant option values ──
+  async function translateVariants(p, btn) {
+    const { store, token } = getCredentials();
+    const lang = (sourceLang && sourceLang.value !== 'auto') ? sourceLang.value : 'en';
+    const langPair = `${lang}|es`;
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = '⏳';
+
+    try {
+      // Collect unique option values
+      const unique = new Set();
+      p.variants.forEach(v => {
+        if (v.option1) unique.add(v.option1);
+        if (v.option2) unique.add(v.option2);
+        if (v.option3) unique.add(v.option3);
+      });
+
+      const translations = {};
+      for (const val of unique) {
+        const t = await translateText(val, langPair);
+        if (t && t !== val) translations[val] = t;
+      }
+
+      if (!Object.keys(translations).length) {
+        btn.textContent = '✓ Ya traducido';
+        setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2000);
+        return;
+      }
+
+      // Apply translations to variant objects
+      const updatedVariants = p.variants.map(v => ({
+        id:      v.id,
+        option1: translations[v.option1] || v.option1 || undefined,
+        option2: translations[v.option2] || v.option2 || undefined,
+        option3: translations[v.option3] || v.option3 || undefined,
+      }));
+
+      const res = await fetch('/api/shopify/manage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ store, token, action: 'update_variants', product_id: p.id, variants: updatedVariants }),
+      });
+      const data = await res.json();
+      btn.textContent = `✅ ${data.updated} var.`;
+    } catch (e) {
+      btn.textContent = '❌';
+    } finally {
+      btn.disabled = false;
+      setTimeout(() => { btn.textContent = orig; }, 3500);
+    }
+  }
+
+  // ── Delete a single product ──
+  async function deleteProduct(p, row, btn) {
+    if (!confirm(`¿Eliminar "${p.title}" de Shopify?`)) return;
+    const { store, token } = getCredentials();
+    btn.disabled = true; btn.textContent = '⏳';
+    try {
+      const res = await fetch('/api/shopify/manage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ store, token, action: 'delete', product_id: p.id }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        row.style.opacity = '0.3';
+        row.style.pointerEvents = 'none';
+        setTimeout(() => row.remove(), 800);
+      } else {
+        btn.textContent = '❌'; btn.disabled = false;
+      }
+    } catch (e) {
+      btn.textContent = '❌'; btn.disabled = false;
+    }
+  }
+
+  function updateDeleteBtn() {
+    deleteSelectedBtn.style.display = selectedIds.size > 0 ? '' : 'none';
+    deleteSelectedBtn.textContent = `🗑️ Eliminar seleccionados (${selectedIds.size})`;
+  }
+
+  function setStatus(msg, isError) {
+    if (!statusEl) return;
+    statusEl.textContent = msg;
+    statusEl.style.color = isError ? '#f87171' : 'rgba(255,255,255,0.45)';
+    statusEl.style.display = msg ? '' : 'none';
+  }
+
+  // Enable the toggle button as soon as the store is connected (OAuth redirect)
+  const observer = new MutationObserver(() => checkConnected());
+  const oauthStatus = $('shopifyOAuthStatus');
+  if (oauthStatus) observer.observe(oauthStatus, { childList: true, subtree: true, characterData: true });
+})();
