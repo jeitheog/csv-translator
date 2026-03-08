@@ -1830,8 +1830,36 @@ function formatBytes(bytes) {
             const tBody = await translateText(payload.body_html, langPair);
             if (tBody) payload.body_html = tBody;
           }
+          // Translate unique variant option values (colors, materials, etc.)
+          const optValuesToTranslate = new Set();
+          if (payload.variants) {
+            for (const v of payload.variants) {
+              if (v.option1 && v.option1 !== 'Default Title') optValuesToTranslate.add(v.option1);
+              if (v.option2) optValuesToTranslate.add(v.option2);
+              if (v.option3) optValuesToTranslate.add(v.option3);
+            }
+          }
+          const optTranslations = {};
+          for (const val of optValuesToTranslate) {
+            const t = await translateText(val, langPair);
+            if (t && t !== val) optTranslations[val] = t;
+          }
+          if (Object.keys(optTranslations).length > 0) {
+            if (payload.variants) {
+              for (const v of payload.variants) {
+                if (optTranslations[v.option1]) v.option1 = optTranslations[v.option1];
+                if (optTranslations[v.option2]) v.option2 = optTranslations[v.option2];
+                if (optTranslations[v.option3]) v.option3 = optTranslations[v.option3];
+              }
+            }
+            if (payload.options) {
+              for (const opt of payload.options) {
+                if (opt.values) opt.values = opt.values.map(v => optTranslations[v] || v);
+              }
+            }
+          }
         } catch (e) {
-          console.warn('Scraper title/body translation failed:', e);
+          console.warn('Scraper translation failed:', e);
         }
       }
 
