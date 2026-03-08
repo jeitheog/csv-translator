@@ -94,18 +94,14 @@
         const data = await res.json();
 
         if (data.success && data.token) {
-          icon.textContent  = '✅';
-          icon.classList.remove('spinning');
-          title.textContent = `¡Conectado a ${data.shop_name}!`;
-          title.classList.add('success');
-          msg.textContent   = 'Volviendo a la aplicación...';
-          // Write to localStorage — main window polls and closes this popup
+          // Save result and redirect back to main page — no popup needed
           localStorage.setItem('shopify_oauth_result', JSON.stringify({
             type:      'shopify_oauth_success',
             token:     data.token,
             store:     data.store,
             shop_name: data.shop_name,
           }));
+          window.location.replace('/');
         } else {
           throw new Error(data.error || 'Error desconocido');
         }
@@ -115,10 +111,12 @@
         title.textContent = 'Error al conectar';
         msg.textContent   = e.message;
         msg.classList.add('error');
+        // Write error and redirect back after 2s so user sees the error
         localStorage.setItem('shopify_oauth_result', JSON.stringify({
           type:  'shopify_oauth_error',
           error: e.message,
         }));
+        setTimeout(() => window.location.replace('/'), 2500);
       }
     })();
   </script>
