@@ -2062,10 +2062,15 @@ function formatBytes(bytes) {
     return { store, token };
   }
 
-  // Enable toggle when store is connected
+  const connHint = $('mgmtConnHint');
+
+  // Enable toggle when store is connected; update hint text
   function checkConnected() {
     const { store, token } = getCredentials();
-    if (store && token) toggleBtn.disabled = false;
+    if (store && token) {
+      toggleBtn.disabled = false;
+      if (connHint) connHint.textContent = `Tienda conectada: ${store}`;
+    }
   }
   checkConnected();
   window.addEventListener('load', checkConnected);
@@ -2075,6 +2080,7 @@ function formatBytes(bytes) {
     const open = panel.style.display === 'none';
     panel.style.display = open ? '' : 'none';
     toggleArrow.textContent = open ? '▲' : '▼';
+    toggleBtn.querySelector('span:last-child') && (toggleBtn.querySelector('span:last-child').textContent = open ? 'Ocultar' : 'Ver productos');
     if (open && listEl.children.length === 0) loadProducts();
   });
 
