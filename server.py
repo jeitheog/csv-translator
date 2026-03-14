@@ -23,7 +23,7 @@ PORT = 8080
 SHOPIFY_API_VERSION = "2024-01"
 
 # Directorio de archivos estáticos (donde está este script)
-STATIC_DIR = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'public')
 
 
 # ── Carga .env ──────────────────────────────────────────────
